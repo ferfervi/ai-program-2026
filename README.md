@@ -2,9 +2,31 @@
 
 Estimator CAG is a FastAPI service for generating software project estimates from meeting transcripts.
 
-## Quick Start
+## Launch the project
 
-### 1. Start the server
+### Execution with Docker
+
+Use Docker Compose to build and start the service in a container.
+
+```bash
+make start-docker
+```
+
+This runs:
+
+```bash
+docker-compose up --build -d
+```
+
+To stop the Docker stack:
+
+```bash
+make stop-docker
+```
+
+### Local execution without Docker
+
+Run the app locally with the project's Python tooling.
 
 ```bash
 make serve
@@ -16,9 +38,9 @@ This runs:
 uv run uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`.
+The API is available at `http://localhost:8000`.
 
-### 2. Check service health
+## Health check
 
 ```bash
 make health
@@ -26,7 +48,7 @@ make health
 
 This sends a request to `http://localhost:8000/health` and verifies that it returns `200`.
 
-### 3. Run a sample estimation request
+## Run a sample estimation request
 
 ```bash
 make estimate
@@ -44,10 +66,20 @@ make estimate TRANSCRIPTION_FILE=app/data/another_transcription.md
 
 ## Available Make targets
 
-- `make serve` - Start the development server
+### Docker targets
+
+- `make start-docker` - Build and start the service with Docker Compose
+- `make stop-docker` - Stop the Compose services
+
+### Local targets
+
+- `make serve` - Start the app locally with auto-reload
+- `make stop` - Stop the local development server
+
+### Common targets
+
 - `make estimate` - Send a sample estimation request to the endpoint
 - `make health` - Check the health endpoint
-- `make stop` - Stop the server if it is running
 
 ## Relevant endpoints
 

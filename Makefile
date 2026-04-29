@@ -8,8 +8,18 @@ estimate:
 health:
 	@curl -sS "$(HEALTH_URL)"
 
+# Launch with docker
+start-docker:
+	@docker-compose up --build -d
+
+stop-docker:
+	@docker-compose down
+
+
+# Launch the server in development mode with auto-reload
 serve:
 	@uv run uvicorn app.main:app --reload
+
 
 stop:
 	@pkill -f "uvicorn app.main:app" || true
