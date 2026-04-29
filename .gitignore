@@ -1,0 +1,117 @@
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.env.local
+.env.*.local
+
+
+# Environment Variables
+.env
+.env.example
+.env.development
+.env.production
+.envrc
+agents_load_env.sh
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Poetry
+poetry.lock
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.vim/
+.emacs.d/
+
+# OS Files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+*.lnk
+
+# Database Files
+*.sqlite3
+*.db
+*.sqlite
+chroma_db/
+*.log
+
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Temporary Files
+*.tmp
+*.bak
+*.swp
+*~
+.#*
+
+# Node/Frontend (if applicable)
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+
+# Project Specific
+*.pid
+.vscode/settings.json
+.vscode/launch.json
+data/
+chroma_db/
+
+# Compiled files
+*.o
+*.a
+*.so
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Local environment overrides
+.local/
