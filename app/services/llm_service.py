@@ -1,5 +1,5 @@
 import structlog
-
+from typing import Iterator
 
 from app.config import settings
 from app.services.open_ai_service import  OpenAIEstimator
@@ -64,6 +64,26 @@ def generate_estimation(transcript: str) -> LLMEstimation:
                 token_usage=anthropic_estimation.token_usage
             )
         
+        case _:
+            raise ValueError(
+                f"Proveedor de LLM desconocido: {settings.LLM_PROVIDER}. Use 'openai' o 'anthropic'."
+            )
+
+
+def generate_estimation_stream(transcript: str) -> Iterator[dict]:
+    """Stream OpenAI estimation events, including partial text and final token usage."""
+    system_prompt = build_system_prompt()
+    user_prompt = transcript.strip()
+
+    provider = settings.LLM_PROVIDER.lower()
+
+    match provider:
+        case "openai":
+            return OpenAIEstimator().estimate_stream(system_prompt, user_prompt)
+
+        case "anthropic":
+            raise ValueError("Streaming sólo está disponible para el proveedor OpenAI.")
+
         case _:
             raise ValueError(
                 f"Proveedor de LLM desconocido: {settings.LLM_PROVIDER}. Use 'openai' o 'anthropic'."

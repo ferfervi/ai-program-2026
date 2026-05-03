@@ -11,8 +11,12 @@ app.include_router(prefix="/api/v1", router=router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    #logging for debugging
+    print("Health check endpoint was called.")
+    return {"status": "healthy"}
 
 @app.get("/")
 def main():
+    # logging for debugging
+    print("Root endpoint was called.")
     return {"message": "Please check the API documentation at endpoint /docs."}
