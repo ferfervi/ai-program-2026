@@ -12,6 +12,7 @@ class TokenUsage(BaseModel):
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    cost_usd: float = 0.0
 
 class LLMEstimation(BaseModel):
     estimation: str

@@ -28,6 +28,7 @@ def test_openai_estimator_returns_mocked_estimation(monkeypatch):
     assert result.token_usage.input_tokens == 0
     assert result.token_usage.output_tokens == 0
     assert result.token_usage.total_tokens == 0
+    assert result.token_usage.cost_usd == 0.0
 
     fake_client.responses.create.assert_called_once_with(
         model="gpt-4",
@@ -61,7 +62,12 @@ def test_openai_estimator_streams_text_chunks(monkeypatch):
     assert events[2]["estimation"] == "Hello world"
     assert events[2]["provider"] == "openai"
     assert events[2]["model"] == "gpt-4"
-    assert events[2]["token_usage"] == {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}
+    assert events[2]["token_usage"] == {
+        "input_tokens": 1,
+        "output_tokens": 2,
+        "total_tokens": 3,
+        "cost_usd": 0.00015,
+    }
     assert "timestamp" in events[2]
     fake_client.responses.create.assert_called_once_with(
         model="gpt-4",

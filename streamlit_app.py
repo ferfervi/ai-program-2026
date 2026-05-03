@@ -100,6 +100,7 @@ def display_sidebar():
             st.write("**Model:**", metrics.get("model", ""))
             st.write("**Input tokens:**", metrics.get("input_tokens", ""))
             st.write("**Output tokens:**", metrics.get("output_tokens", ""))
+            st.write("**Estimated cost:**", f"${metrics.get('cost_usd', 0.0):.6f}")
             st.write("**Response time:**", f"{metrics.get('response_time_ms', 0)} ms")
             st.write("\n_Updated after the latest estimation call._")
         else:
@@ -153,6 +154,8 @@ def display_metadata(data: Dict):
         st.write("**Input tokens:**", token_usage.get("input_tokens"))
         st.write("**Output tokens:**", token_usage.get("output_tokens"))
         st.write("**Total tokens:**", token_usage.get("total_tokens"))
+        if token_usage.get("cost_usd") is not None:
+            st.write("**Estimated cost:**", f"${token_usage.get('cost_usd', 0.0):.6f}")
 
 
 def send_query(api_url: str, payload: Dict, timeout: int = 30) -> requests.Response:
@@ -197,23 +200,22 @@ def handle_user_interaction():
     st.session_state.messages.append({"role": "user", "content": user_input})
 
     # Call backend
-    with st.spinner("🔍 Providing estimation..."):
-        try:
-            start_time = datetime.utcnow()
-            payload = {"transcription": user_input, "thread_id": st.session_state.thread_id}
-            resp = send_stream_query(STREAM_API_URL, payload)
+    try:
+        start_time = datetime.utcnow()
+        payload = {"transcription": user_input, "thread_id": st.session_state.thread_id}
+        resp = send_stream_query(STREAM_API_URL, payload)
 
-            if resp.status_code != 200:
-                st.error(f"❌ Server error: {resp.status_code}")
-                st.write(resp.text)
-                return
+        if resp.status_code != 200:
+            st.error(f"❌ Server error: {resp.status_code}")
+            st.write(resp.text)
+            return
 
-            assistant_text = ""
-            event_lines: List[str] = []
-            with st.chat_message("assistant"):
-                assistant_placeholder = st.empty()
-                status_placeholder = st.empty()
-                status_placeholder.info("🟢 Generating estimation... Please wait.")
+        assistant_text = ""
+        event_lines: List[str] = []
+        with st.chat_message("assistant"):
+            assistant_placeholder = st.empty()
+            status_placeholder = st.empty()
+            with st.spinner("🔍 Providing estimation..."):
                 for raw_line in resp.iter_lines(decode_unicode=True):
                     if raw_line is None:
                         continue
@@ -232,13 +234,14 @@ def handle_user_interaction():
                         elif event_type == "done":
                             assistant_text = event.get("estimation", assistant_text)
                             assistant_placeholder.markdown(assistant_text)
-                            status_placeholder.success("✅ Estimation complete.")
+                            status_placeholder.success("✅ Estimation completed.")
                             st.session_state.messages.append({"role": "assistant", "content": assistant_text})
                             response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                             st.session_state.last_call_metrics = {
                                 "model": event.get("model", ""),
                                 "input_tokens": event.get("token_usage", {}).get("input_tokens", 0),
                                 "output_tokens": event.get("token_usage", {}).get("output_tokens", 0),
+                                "cost_usd": event.get("token_usage", {}).get("cost_usd", 0.0),
                                 "response_time_ms": response_time_ms,
                             }
                             with st.expander("📊 Debug Info"):
@@ -253,39 +256,41 @@ def handle_user_interaction():
                     if event and event.get("type") == "done":
                         assistant_text = event.get("estimation", assistant_text)
                         assistant_placeholder.markdown(assistant_text)
-                        status_placeholder.success("✅ Estimation complete.")
+                        status_placeholder.success("✅ Estimation completed.")
                         st.session_state.messages.append({"role": "assistant", "content": assistant_text})
                         response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
                         st.session_state.last_call_metrics = {
                             "model": event.get("model", ""),
                             "input_tokens": event.get("token_usage", {}).get("input_tokens", 0),
                             "output_tokens": event.get("token_usage", {}).get("output_tokens", 0),
+                            "cost_usd": event.get("token_usage", {}).get("cost_usd", 0.0),
                             "response_time_ms": response_time_ms,
                         }
                         with st.expander("📊 Debug Info"):
                             display_metadata(event)
                         return
 
-            if assistant_text:
-                st.session_state.messages.append({"role": "assistant", "content": assistant_text})
-            else:
-                st.error("❌ No se recibieron datos de streaming.")
+        if assistant_text:
+            st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+        else:
+            status_placeholder.empty()
+            st.error("❌ No se recibieron datos de streaming.")
 
-        except requests.exceptions.ConnectionError:
-            st.error(
-                """
-            ❌ **Cannot connect to server**
-
-            Make sure the backend is running:
-            ```bash
-            uv run uvicorn app.main:app --reload
-            ```
+    except requests.exceptions.ConnectionError:
+        st.error(
             """
-            )
-        except requests.exceptions.Timeout:
-            st.error("⏱️ Request timed out. The server took too long to respond.")
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+        ❌ **Cannot connect to server**
+
+        Make sure the backend is running:
+        ```bash
+        uv run uvicorn app.main:app --reload
+        ```
+        """
+        )
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timed out. The server took too long to respond.")
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
 
 
 # -----------------

@@ -29,7 +29,7 @@ class AnthropicEstimator:
             return AnthropicEstimation(
                 estimation=response.completion.strip(),
                 provider_info=LLMProviderInfo(provider="anthropic", model=settings.LLM_MODEL),
-                token_usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
+                token_usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0, cost_usd=0.0),
             )
 
         if getattr(response, "output", None):
@@ -38,7 +38,7 @@ class AnthropicEstimator:
                 return AnthropicEstimation(
                     estimation=output[0].content[0].text.strip(),
                     provider_info=LLMProviderInfo(provider="anthropic", model=settings.LLM_MODEL),
-                    token_usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0)
+                    token_usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0, cost_usd=0.0),
                 )
 
         raise RuntimeError("Respuesta de Anthropic inválida o inesperada.")
