@@ -1,10 +1,18 @@
-from typing import Dict, List
+import structlog
 
-from anthropic import Anthropic
-from openai import OpenAI
+
 from app.config import settings
+from app.services.open_ai_service import  OpenAIEstimator
+from app.services.anthropic_service import AnthropicEstimator
 from app.context.examples import ESTIMATION_EXAMPLES
 
+
+
+log = structlog.get_logger()
+
+MAX_TOKENS = 4000
+
+from app.schemas.llm_io import LLMEstimation, LLMProviderInfo
 
 def build_system_prompt() -> str:
     """Construye el prompt de sistema con el rol y los ejemplos de estimación."""
@@ -27,73 +35,36 @@ def build_system_prompt() -> str:
     return f"{instructions}\n\n" + "\n\n".join(examples)
 
 
-def _openai_completion(system_prompt: str, user_prompt: str) -> str:
-    if not settings.OPEN_API_KEY:
-        raise ValueError("OPEN_API_KEY no está configurada.")
-
-    client = OpenAI(api_key=settings.OPEN_API_KEY)
-    response = client.responses.create(
-        model=settings.LLM_MODEL,
-        instructions=system_prompt,
-        input=user_prompt,
-        temperature=0.2,
-    )
-
-    output_text = getattr(response, "output_text", None)
-    if output_text:
-        return output_text.strip()
-
-    # Fallback para versiones que exponen la respuesta en output.
-    if getattr(response, "output", None):
-        output = response.output
-        if output and getattr(output[0], "content", None):
-            return output[0].content[0].text.strip()
-
-    raise RuntimeError("Respuesta de OpenAI inválida o inesperada.")
-
-
-def _anthropic_completion(messages: List[Dict[str, str]]) -> str:
-    if not settings.ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY no está configurada.")
-
-    anthropic_client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = anthropic_client.messages.create(
-        model=settings.LLM_MODEL,
-        max_tokens=1024,
-        system="Eres un estimador de software experto con 20 años de experiencia. Responde de manera directa y técnica.",
-        messages=[
-            {"role": message["role"], "content": message["content"].strip()}
-            for message in messages
-        ],
-    )
-
-    if getattr(response, "completion", None):
-        return response.completion.strip()
-
-    if getattr(response, "output", None):
-        output = response.output
-        if output and getattr(output[0], "content", None):
-            return output[0].content[0].text.strip()
-
-    raise RuntimeError("Respuesta de Anthropic inválida o inesperada.")
-
-
-def generate_estimation(transcript: str) -> str:
+def generate_estimation(transcript: str) -> LLMEstimation:
     """Genera una estimación a partir de la transcripción usando el proveedor configurado."""
     system_prompt = build_system_prompt()
     user_prompt = transcript.strip()
 
     provider = settings.LLM_PROVIDER.lower()
-    if provider == "openai":
-        return _openai_completion(system_prompt, user_prompt)
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-    if provider == "anthropic":
-        return _anthropic_completion(messages)
+    match provider:
+        case "openai":
+            openai_estimation = OpenAIEstimator().estimate(system_prompt, user_prompt)
 
-    raise ValueError(
-        f"Proveedor de LLM desconocido: {settings.LLM_PROVIDER}. Use 'openai' o 'anthropic'."
-    )
+            return LLMEstimation(
+                estimation=openai_estimation.estimation,
+                provider_info=openai_estimation.provider_info,
+                token_usage=openai_estimation.token_usage
+            )
+        
+        case "anthropic":
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            anthropic_estimation = AnthropicEstimator().estimate(messages)
+            return LLMEstimation(
+                estimation=anthropic_estimation.estimation,
+                provider_info=anthropic_estimation.provider_info,
+                token_usage=anthropic_estimation.token_usage
+            )
+        
+        case _:
+            raise ValueError(
+                f"Proveedor de LLM desconocido: {settings.LLM_PROVIDER}. Use 'openai' o 'anthropic'."
+            )

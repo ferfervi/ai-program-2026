@@ -24,3 +24,6 @@ serve:
 stop:
 	@pkill -f "uvicorn app.main:app" || true
 	@pkill -f "uv run uvicorn app.main:app" || true
+
+test:
+	@pytest -v 
