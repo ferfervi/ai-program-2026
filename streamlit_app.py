@@ -8,6 +8,9 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from app.services.llm_service import build_system_prompt
+from app.context.examples import ESTIMATION_EXAMPLES
+
 
 API_URL = os.getenv("API_URL", "http://localhost:8000/api/v1/estimate")
 STREAM_API_URL = f"{API_URL}/stream"
@@ -32,6 +35,15 @@ def inject_css():
     <style>
         body { background-color: #f5f5f5; }
         .main { padding: 2rem; }
+        section[data-testid="stSidebar"] button {
+            padding: 0.35rem 0.75rem !important;
+            font-size: 0.88rem !important;
+            min-height: 32px !important;
+            line-height: 1.2 !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button {
+            width: auto !important;
+        }
     </style>
 """,
         unsafe_allow_html=True,
@@ -39,7 +51,7 @@ def inject_css():
 
 
 def display_header():
-    st.title("🤖 Project tasks estimator")
+    st.title("🚀 Project task estimator")
     st.markdown(
         f"""
         Estimate the time and resources needed for your project tasks.
@@ -55,12 +67,15 @@ def init_session():
         st.session_state.thread_id = str(uuid.uuid4())
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "last_call_metrics" not in st.session_state:
+        st.session_state.last_call_metrics = {}
 
 
 def display_sidebar():
     with st.sidebar:
-        st.header("Session Info")
-        st.write(f"**Thread ID:** `{st.session_state.thread_id[:8]}...`")
+        st.markdown("### How it works:")
+        st.caption("""1. Type your transcription of the meeting task definition
+2. The assistant provides an estimation based on the transcription and the company guidelines""")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -68,23 +83,48 @@ def display_sidebar():
                 st.session_state.messages = []
                 st.rerun()
         with col2:
-            if st.button("🔄 New Session"):
-                st.session_state.thread_id = str(uuid.uuid4())
-                st.session_state.messages = []
-                st.rerun()
+            st.write(" ")
+            st.write(" ")
 
-        st.divider()
-        st.markdown("### How it works:")
-        st.markdown("""
-    1. Type your transcription of the meeting task definition
-    2. The assistant provides an estimation based on the transcription and the company guidelines
-    """)
         if st.button("Test Connection to AI Server"):
             try:
                 res = requests.get("http://localhost:8000/health") # O la ruta raíz de tu API
                 st.write(f"Respuesta del backend: {res.json()}")
             except Exception as e:
                 st.error(f"Fallo total: {e}")
+
+        st.divider()
+        st.markdown("### 📊 Last call metrics")
+        if st.session_state.last_call_metrics:
+            metrics = st.session_state.last_call_metrics
+            st.write("**Model:**", metrics.get("model", ""))
+            st.write("**Input tokens:**", metrics.get("input_tokens", ""))
+            st.write("**Output tokens:**", metrics.get("output_tokens", ""))
+            st.write("**Response time:**", f"{metrics.get('response_time_ms', 0)} ms")
+            st.write("\n_Updated after the latest estimation call._")
+        else:
+            st.write("🤷‍♂️ No hay métricas de llamada aún.")
+            st.write("Envía una estimación para ver modelo, tokens y tiempo de respuesta aquí.")
+
+        st.divider()
+        st.markdown("### 🧠 Active system prompt")
+        st.text_area("System prompt", build_system_prompt(), height=200, disabled=True)
+
+        st.divider()
+        st.markdown("### Static injected context")
+        for index, example in enumerate(ESTIMATION_EXAMPLES, start=1):
+            with st.expander(f"Ejemplo {index}"):
+                st.markdown(f"**Resumen de la reunión:** {example.get('meeting_summary', '').strip()}")
+                st.markdown("**Estimación:**")
+                st.code(example.get('estimation', '').strip())
+
+        st.divider()
+        st.header("Session Info")
+        st.write(f"**Thread ID:** `{st.session_state.thread_id[:8]}...`")
+        if st.button("🔄 New Session"):
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.messages = []
+            st.rerun()
 
 
 def display_chat_history():
@@ -159,6 +199,7 @@ def handle_user_interaction():
     # Call backend
     with st.spinner("🔍 Providing estimation..."):
         try:
+            start_time = datetime.utcnow()
             payload = {"transcription": user_input, "thread_id": st.session_state.thread_id}
             resp = send_stream_query(STREAM_API_URL, payload)
 
@@ -171,6 +212,8 @@ def handle_user_interaction():
             event_lines: List[str] = []
             with st.chat_message("assistant"):
                 assistant_placeholder = st.empty()
+                status_placeholder = st.empty()
+                status_placeholder.info("🟢 Generating estimation... Please wait.")
                 for raw_line in resp.iter_lines(decode_unicode=True):
                     if raw_line is None:
                         continue
@@ -189,7 +232,15 @@ def handle_user_interaction():
                         elif event_type == "done":
                             assistant_text = event.get("estimation", assistant_text)
                             assistant_placeholder.markdown(assistant_text)
+                            status_placeholder.success("✅ Estimation complete.")
                             st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+                            response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                            st.session_state.last_call_metrics = {
+                                "model": event.get("model", ""),
+                                "input_tokens": event.get("token_usage", {}).get("input_tokens", 0),
+                                "output_tokens": event.get("token_usage", {}).get("output_tokens", 0),
+                                "response_time_ms": response_time_ms,
+                            }
                             with st.expander("📊 Debug Info"):
                                 display_metadata(event)
                             return
@@ -202,19 +253,21 @@ def handle_user_interaction():
                     if event and event.get("type") == "done":
                         assistant_text = event.get("estimation", assistant_text)
                         assistant_placeholder.markdown(assistant_text)
+                        status_placeholder.success("✅ Estimation complete.")
                         st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+                        response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                        st.session_state.last_call_metrics = {
+                            "model": event.get("model", ""),
+                            "input_tokens": event.get("token_usage", {}).get("input_tokens", 0),
+                            "output_tokens": event.get("token_usage", {}).get("output_tokens", 0),
+                            "response_time_ms": response_time_ms,
+                        }
                         with st.expander("📊 Debug Info"):
                             display_metadata(event)
                         return
 
             if assistant_text:
                 st.session_state.messages.append({"role": "assistant", "content": assistant_text})
-                with st.expander("📊 Debug Info"):
-                    display_metadata({
-                        "model": os.getenv("LLM_MODEL", ""),
-                        "provider": os.getenv("LLM_PROVIDER", ""),
-                        "timestamp": str(datetime.utcnow()),
-                    })
             else:
                 st.error("❌ No se recibieron datos de streaming.")
 
@@ -244,9 +297,9 @@ def main():
     inject_css()
     display_header()
     init_session()
-    display_sidebar()
     display_chat_history()
     handle_user_interaction()
+    display_sidebar()
 
 
 if __name__ == "__main__":
