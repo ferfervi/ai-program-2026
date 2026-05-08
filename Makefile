@@ -17,8 +17,11 @@ stop-docker:
 
 
 # Launch the server in development mode with auto-reload
-serve:
+server:
 	@uv run uvicorn app.main:app --reload
+
+ui:
+	@streamlit run streamlit_app.py
 
 
 stop:
