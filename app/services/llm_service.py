@@ -1,3 +1,5 @@
+
+import time
 import structlog
 from typing import Iterator
 
@@ -10,7 +12,8 @@ from app.context.examples import ESTIMATION_EXAMPLES
 
 log = structlog.get_logger()
 
-MAX_TOKENS = 4000
+DEFAULT_MAX_TOKENS = 4000
+EXTRACTION_MAX_TOKENS = 1500
 
 from app.schemas.llm_io import LLMEstimation, LLMProviderInfo
 
@@ -37,6 +40,8 @@ def build_system_prompt() -> str:
 
 def generate_estimation(transcript: str) -> LLMEstimation:
     """Genera una estimación a partir de la transcripción usando el proveedor configurado."""
+
+    t0 = time.perf_counter()
     system_prompt = build_system_prompt()
     user_prompt = transcript.strip()
 
@@ -49,7 +54,9 @@ def generate_estimation(transcript: str) -> LLMEstimation:
             return LLMEstimation(
                 estimation=openai_estimation.estimation,
                 provider_info=openai_estimation.provider_info,
-                token_usage=openai_estimation.token_usage
+                token_usage=openai_estimation.token_usage,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                finish_reason=openai_estimation.finish_reason
             )
         
         case "anthropic":
@@ -61,7 +68,9 @@ def generate_estimation(transcript: str) -> LLMEstimation:
             return LLMEstimation(
                 estimation=anthropic_estimation.estimation,
                 provider_info=anthropic_estimation.provider_info,
-                token_usage=anthropic_estimation.token_usage
+                token_usage=anthropic_estimation.token_usage,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                finish_reason="unknown"  # Placeholder for finish reason
             )
         
         case _:

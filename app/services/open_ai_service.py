@@ -1,4 +1,5 @@
-from datetime import datetime
+import time
+
 from typing import Iterator
 
 from app.config import settings
@@ -87,6 +88,7 @@ class OpenAIEstimator:
                 estimation=output_text.strip(),
                 provider_info=LLMProviderInfo(provider="openai", model=settings.LLM_MODEL),
                 token_usage=token_usage,
+                finish_reason=getattr(response, "finish_reason", "unknown")
             )
 
         # Fallback para versiones que exponen la respuesta en output.
@@ -97,6 +99,7 @@ class OpenAIEstimator:
                     estimation=output[0].content[0].text.strip(),
                     provider_info=LLMProviderInfo(provider="openai", model=settings.LLM_MODEL),
                     token_usage=token_usage,
+                    finish_reason=getattr(response, "finish_reason", "unknown")
                 )
 
         raise RuntimeError("Respuesta de OpenAI inválida o inesperada.")
@@ -109,6 +112,8 @@ class OpenAIEstimator:
             temperature=0.2,
             stream=True,
         )
+
+        t0 = time.perf_counter()
 
         accumulated = ""
         last_token_usage = None
@@ -145,7 +150,7 @@ class OpenAIEstimator:
                     "estimation": accumulated.strip(),
                     "provider": "openai",
                     "model": settings.LLM_MODEL,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "latency_ms": int((time.perf_counter() - t0) * 1000),
                     "token_usage": last_token_usage or {
                         "input_tokens": 0,
                         "output_tokens": 0,
@@ -160,7 +165,7 @@ class OpenAIEstimator:
             "estimation": accumulated.strip(),
             "provider": "openai",
             "model": settings.LLM_MODEL,
-            "timestamp": datetime.utcnow().isoformat(),
+            "latency_ms": int((time.perf_counter() - t0) * 1000),
             "token_usage": last_token_usage or {
                 "input_tokens": 0,
                 "output_tokens": 0,

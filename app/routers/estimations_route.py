@@ -8,7 +8,8 @@ from app.config import settings
 from app.services.llm_service import generate_estimation, generate_estimation_stream
 from app.schemas.request_io import EstimationRequest, EstimationResponse
 
-
+import structlog
+log = structlog.get_logger()
 
 router = APIRouter(tags=["estimations"])
 
@@ -17,22 +18,27 @@ router = APIRouter(tags=["estimations"])
 async def estimate(request: EstimationRequest) -> EstimationResponse:
     """Generating a software project estimation based on the provided meeting transcription."""
 
-#log the incoming request for debugging
-    print(f"Received estimation request at {datetime.utcnow()}: {request}")
-
+    log.info("Received estimation request", request=request.model_dump())
+    
     llm_estimation = generate_estimation(request.transcription)
 
     return EstimationResponse(
         estimation=llm_estimation.estimation,
         model=llm_estimation.provider_info.model,
         provider=llm_estimation.provider_info.provider,
-        timestamp=datetime.utcnow(),
+        usage=llm_estimation.token_usage,
+        finish_reason=llm_estimation.finish_reason,
+        latency_ms=llm_estimation.latency_ms, 
+        cost_usd=llm_estimation.token_usage.cost_usd
     )
 
 
 @router.post("/estimate/stream")
 async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
     """Stream model output as it is generated for OpenAI estimations."""
+
+    log.info("Received streaming estimation request", request=request.model_dump())
+
     if settings.LLM_PROVIDER.lower() != "openai":
         raise HTTPException(
             status_code=400,

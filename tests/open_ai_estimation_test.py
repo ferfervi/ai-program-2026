@@ -68,7 +68,7 @@ def test_openai_estimator_streams_text_chunks(monkeypatch):
         "total_tokens": 3,
         "cost_usd": 0.00015,
     }
-    assert "timestamp" in events[2]
+    assert "latency_ms" in events[2]
     fake_client.responses.create.assert_called_once_with(
         model="gpt-4",
         instructions="system prompt",
@@ -90,7 +90,7 @@ def test_streaming_endpoint_returns_chunked_events(monkeypatch):
             "estimation": "Hello world",
             "provider": "openai",
             "model": "gpt-4",
-            "timestamp": "2026-05-03T00:00:00",
+            "latency_ms": 100,
             "token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         },
     ])
