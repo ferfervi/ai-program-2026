@@ -1,13 +1,10 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Literal
 
 from pydantic import BaseModel, Field
 from app.schemas.llm_io import TokenUsage
-from app.schemas.estimation_io import StructureCheck
+from app.schemas.estimation_io import StructureCheck, PreprocessingMode
 
-PreprocessingMode = Literal["none", "inline_cleaning", "two_phase"]
-ExampleFormat = Literal["markdown", "json", "narrative"]
 
 
 

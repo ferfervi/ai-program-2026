@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.config import settings
+from app.config import get_settings
 from app.services.llm_service import generate_estimation, generate_estimation_stream
 from app.schemas.request_io import EstimationRequest, EstimationResponse
 
@@ -39,6 +39,7 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
 
     log.info("Received streaming estimation request", request=request.model_dump())
 
+    settings = get_settings()
     if settings.LLM_PROVIDER.lower() != "openai":
         raise HTTPException(
             status_code=400,

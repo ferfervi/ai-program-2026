@@ -9,7 +9,7 @@ from app.services.open_ai_service import OpenAIEstimator
 
 
 def test_openai_estimator_returns_mocked_estimation(monkeypatch):
-    monkeypatch.setattr(settings, "OPEN_API_KEY", "test-api-key", raising=False)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-api-key", raising=False)
     monkeypatch.setattr(settings, "LLM_MODEL", "gpt-4", raising=False)
 
     fake_response = MagicMock()
@@ -40,7 +40,7 @@ def test_openai_estimator_returns_mocked_estimation(monkeypatch):
 
 
 def test_openai_estimator_streams_text_chunks(monkeypatch):
-    monkeypatch.setattr(settings, "OPEN_API_KEY", "test-api-key", raising=False)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-api-key", raising=False)
     monkeypatch.setattr(settings, "LLM_MODEL", "gpt-4", raising=False)
 
     fake_event_1 = MagicMock(type="response.output_text.delta", delta="Hello")

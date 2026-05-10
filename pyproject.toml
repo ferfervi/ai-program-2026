@@ -5,9 +5,11 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.97.0",
     "fastapi[standard]>=0.136.1",
+    "litellm>=1.83.14",
     "openai>=1.0.0",
     "pydantic-settings>=2.14.0",
     "python-dotenv>=1.2.2",
+    "redis>=7.4.0",
     "streamlit>=1.57.0",
     "structlog>=25.5.0",
     "uvicorn[standard]>=0.46.0",

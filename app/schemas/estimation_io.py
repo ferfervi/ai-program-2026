@@ -1,4 +1,9 @@
 from pydantic import BaseModel, Field
+from typing import Literal
+
+
+PreprocessingMode = Literal["none", "inline_cleaning", "two_phase"]
+ExampleFormat = Literal["markdown", "json", "narrative"]
 
 class StructureCheck(BaseModel):
     """Level-1 structural evaluation of the generated estimation."""

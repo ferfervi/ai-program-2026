@@ -2,7 +2,7 @@ import time
 
 from typing import Iterator
 
-from app.config import settings
+from app.config import get_settings
 from openai import OpenAI
 
 from app.schemas.llm_io import LLMProviderInfo, TokenUsage, OpenAIEstimation
@@ -16,10 +16,11 @@ class OpenAIEstimator:
         "gpt-3.5-turbo-16k": {"prompt": 0.003 / 1000, "completion": 0.004 / 1000},
     }
 
-    def __init__(self, client = OpenAI(api_key=settings.OPEN_API_KEY)):
-        if not settings.OPEN_API_KEY:
-            raise ValueError("OPEN_API_KEY no está configurada.")
+    def __init__(self, client = OpenAI(api_key=get_settings().OPENAI_API_KEY)):
+        if not get_settings().OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY no está configurada.")
         self.client = client
+        self.settings = get_settings()
         
     def _parse_usage(self, usage_obj):
         input_tokens = getattr(usage_obj, "input_tokens", None)
@@ -56,14 +57,14 @@ class OpenAIEstimator:
         return {"prompt": 0.0015 / 1000, "completion": 0.002 / 1000}
 
     def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        pricing = self._find_pricing(settings.LLM_MODEL)
+        pricing = self._find_pricing(self.settings.LLM_MODEL)
         prompt_rate = pricing.get("prompt", 0.0)
         completion_rate = pricing.get("completion", 0.0)
         return round(input_tokens * prompt_rate + output_tokens * completion_rate, 6)
 
     def estimate(self,system_prompt: str, user_prompt: str) -> OpenAIEstimation:
         response = self.client.responses.create(
-            model=settings.LLM_MODEL,
+            model=self.settings.LLM_MODEL,
             instructions=system_prompt,
             input=user_prompt,
             temperature=0.2,
@@ -86,7 +87,7 @@ class OpenAIEstimator:
         if output_text:
             return OpenAIEstimation(
                 estimation=output_text.strip(),
-                provider_info=LLMProviderInfo(provider="openai", model=settings.LLM_MODEL),
+                provider_info=LLMProviderInfo(provider="openai", model=self.settings.LLM_MODEL),
                 token_usage=token_usage,
                 finish_reason=getattr(response, "finish_reason", "unknown")
             )
@@ -97,7 +98,7 @@ class OpenAIEstimator:
             if output and getattr(output[0], "content", None):
                 return OpenAIEstimation(
                     estimation=output[0].content[0].text.strip(),
-                    provider_info=LLMProviderInfo(provider="openai", model=settings.LLM_MODEL),
+                    provider_info=LLMProviderInfo(provider="openai", model=self.settings.LLM_MODEL),
                     token_usage=token_usage,
                     finish_reason=getattr(response, "finish_reason", "unknown")
                 )
@@ -106,7 +107,7 @@ class OpenAIEstimator:
 
     def estimate_stream(self, system_prompt: str, user_prompt: str) -> Iterator[dict]:
         response = self.client.responses.create(
-            model=settings.LLM_MODEL,
+            model=self.settings.LLM_MODEL,
             instructions=system_prompt,
             input=user_prompt,
             temperature=0.2,
@@ -149,7 +150,7 @@ class OpenAIEstimator:
                     "type": "done",
                     "estimation": accumulated.strip(),
                     "provider": "openai",
-                    "model": settings.LLM_MODEL,
+                    "model": self.settings.LLM_MODEL,
                     "latency_ms": int((time.perf_counter() - t0) * 1000),
                     "token_usage": last_token_usage or {
                         "input_tokens": 0,
@@ -164,7 +165,7 @@ class OpenAIEstimator:
             "type": "done",
             "estimation": accumulated.strip(),
             "provider": "openai",
-            "model": settings.LLM_MODEL,
+            "model": self.settings.LLM_MODEL,
             "latency_ms": int((time.perf_counter() - t0) * 1000),
             "token_usage": last_token_usage or {
                 "input_tokens": 0,
