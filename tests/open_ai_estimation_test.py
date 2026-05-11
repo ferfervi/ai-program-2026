@@ -106,7 +106,15 @@ def test_streaming_endpoint_returns_chunked_events(monkeypatch):
     )
 
     client = TestClient(app)
-    response = client.post("/api/v1/estimate/stream", json={"transcription": "test"})
+    response = client.post(
+        "/api/v1/estimate/stream",
+        json={
+            "description": "We need a landing page with a contact form and HubSpot integration.",
+            "project_type": "web_saas",
+            "detail_level": "medium",
+            "output_format": "phases_table",
+        },
+    )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")

@@ -40,10 +40,10 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
 
     log.info("Received estimation request", request=request.model_dump())
     
-    llm_estimation = generate_estimation(request.transcription)
+    llm_estimation = generate_estimation(request.description)
 
     return EstimationResponse(
-        estimation=llm_estimation.estimation,
+        text=llm_estimation.estimation,
         model=llm_estimation.provider_info.model,
         provider=llm_estimation.provider_info.provider,
         usage=llm_estimation.token_usage,
@@ -68,7 +68,7 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
         )
 
     def event_generator():
-        for event in generate_estimation_stream(request.transcription):
+        for event in generate_estimation_stream(request.description):
             _log_stream_event(event)
             payload = json.dumps(event)
             yield f"event: {event.get('type', 'message')}\n"
