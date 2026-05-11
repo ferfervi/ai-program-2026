@@ -40,7 +40,7 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
     log.info("Received streaming estimation request", request=request.model_dump())
 
     settings = get_settings()
-    if settings.LLM_PROVIDER.lower() != "openai":
+    if settings.LLM_PROVIDER.lower() != "openai" and settings.LLM_PROVIDER.lower() != "lite_llm":
         raise HTTPException(
             status_code=400,
             detail="Streaming solo está disponible para el proveedor OpenAI."

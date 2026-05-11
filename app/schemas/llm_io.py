@@ -22,6 +22,7 @@ class LLMEstimation(BaseModel):
     token_usage: TokenUsage
     latency_ms: int = 0
     finish_reason: str = "unknown"
+    cache_hit: bool = False
 
 # OpenAI estimation result model
 
@@ -31,6 +32,7 @@ class OpenAIEstimation(BaseModel):
     token_usage: TokenUsage
     finish_reason: str = "unknown"
     latency_ms: int = 0
+    cache_hit: bool = False
 
 # Anthropic estimation result model
 
@@ -40,4 +42,5 @@ class AnthropicEstimation(BaseModel):
     token_usage: TokenUsage
     finish_reason: str = "unknown"
     latency_ms: int = 0
+    cache_hit: bool = False
 

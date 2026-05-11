@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 import structlog
 from typing import Iterator
 
@@ -164,6 +165,26 @@ def build_system_prompt(
 
 # LLM Wrapper LITE LLM Service
 def _invoke_lite_llm(
+    *,
+    system_prompt: str,
+    user_message: str,
+    model_override: str | None,
+    max_tokens: int,
+    thinking_budget: int | None,
+) -> dict[str, Any]:
+    """Single seam through which every LLM call passes. Tests monkeypatch this."""
+    wrapper = get_litellm_wrapper()
+    return wrapper.complete(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        model_override=model_override,
+        max_tokens=max_tokens,
+        thinking_budget=thinking_budget,
+    )
+
+
+# LLM Wrapper LITE LLM Service
+def _invoke_lite_llm_stream(
     *,
     system_prompt: str,
     user_message: str,
@@ -350,7 +371,83 @@ def generate_estimation_stream(transcript: str) -> Iterator[dict]:
             return OpenAIEstimator().estimate_stream(system_prompt, user_prompt)
 
         case "anthropic":
-            raise ValueError("Streaming sólo está disponible para el proveedor OpenAI.")
+            raise ValueError("Streaming sólo está disponible para el proveedor OpenAI & lite_llm.")
+        
+        case "lite_llm":
+            
+            prep_usage = {"input": 0, "output": 0}
+            opts =  GenerationOptions()
+
+            t0 = time.perf_counter()
+
+            prep_usage = {"input": 0, "output": 0}
+            prep_cost = 0.0
+            extracted_requirements: str | None = None
+            user_input = transcript
+
+            if opts.preprocessing == "two_phase":
+                extracted_requirements, prep_usage, prep_cost = extract_requirements(transcript, opts)
+                user_input = extracted_requirements
+
+            system_prompt = build_system_prompt(
+                example_format=opts.example_format,
+                num_examples=opts.num_examples,
+                use_examples=opts.use_examples,
+                inline_cleaning=(opts.preprocessing == "inline_cleaning"),
+            )
+
+            log.info(
+                "generating_estimation",
+                model_override=opts.model,
+                preprocessing=opts.preprocessing,
+                example_format=opts.example_format,
+                num_examples=opts.num_examples,
+                use_examples=opts.use_examples,
+                max_tokens=opts.max_tokens,
+                thinking_budget=opts.thinking_budget,
+            )
+
+            try:
+                result = _invoke_lite_llm_stream(
+                    system_prompt=system_prompt,
+                    user_message=user_input,
+                    model_override=None,
+                    max_tokens=EXTRACTION_MAX_TOKENS,
+                    thinking_budget=opts.thinking_budget,
+                )
+
+                log.info("llm_response result", **result)
+
+                result["usage"]["preprocessing_input_tokens"] = prep_usage["input"]
+                result["usage"]["preprocessing_output_tokens"] = prep_usage["output"]
+                result["preprocessing"] = opts.preprocessing
+                result["extracted_requirements"] = extracted_requirements
+                result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
+                result["cost_usd"] = round(float(result.get("cost_usd", 0.0)) + prep_cost, 6)
+
+                # ``cache_hit`` is whatever the wrapper returned for the main estimation call.
+                result.setdefault("cache_hit", False)
+
+                yield {
+                    "type": "done",
+                    "estimation": result.get("estimation", ""),
+                    "provider": "litellm",
+                    "model": opts.model or "default",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "token_usage": {
+                        "input_tokens": result["usage"].get("input", 0),
+                        "output_tokens": result["usage"].get("output", 0),
+                        "total_tokens": result["usage"].get("input", 0) + result["usage"].get("output", 0),
+                        "cost_usd": result.get("cost_usd", 0.0),
+                    },
+                    "latency_ms": result["latency_ms"],
+                    "finish_reason": result.get("finish_reason", "unknown"),
+                    "cache_hit": result.get("cache_hit", False),
+                }
+            except Exception as exc:
+                log.error("llm_call_failed", error=str(exc), error_type=type(exc).__name__)
+                raise LLMServiceError(f"LLM call failed: {exc}") from exc
+                
 
         case _:
             raise ValueError(
