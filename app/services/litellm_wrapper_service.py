@@ -243,9 +243,12 @@ class LiteLLMMWrapperService:
         t0 = time.perf_counter()
         full_text: list[str] = []
         raw_usage = None
+        actual_model: str | None = None
         try:
             response = self._dispatch(model_override=model_override, **kwargs)
             for chunk in response:
+                if actual_model is None and getattr(chunk, "model", None):
+                    actual_model = chunk.model
                 # LiteLLM sets usage on the final chunk when stream_options include_usage is on
                 if getattr(chunk, "usage", None) is not None:
                     raw_usage = chunk.usage
@@ -265,7 +268,7 @@ class LiteLLMMWrapperService:
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
         rendered = "".join(full_text)
-        resolved_model = _normalise_model_name(model_override or self.primary_model)
+        resolved_model = _normalise_model_name(actual_model or model_override or self.primary_model)
 
         if raw_usage is not None:
             input_tokens = getattr(raw_usage, "prompt_tokens", 0) or 0

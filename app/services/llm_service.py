@@ -330,7 +330,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
 
                 return LLMEstimation(
                     estimation=result["estimation"],
-                    provider_info=LLMProviderInfo(provider="litellm", model=opts.model or "default"),
+                    provider_info=LLMProviderInfo(provider=result["provider"], model=result["model"] or opts.model or "default"),
                     token_usage=TokenUsage(
                         input_tokens=result["usage"]["input_tokens"],
                         output_tokens=result["usage"]["output_tokens"],
