@@ -1,11 +1,16 @@
 import time
 
 from typing import Iterator
+import structlog
+
 
 from app.config import get_settings
 from openai import OpenAI
 
 from app.schemas.llm_io import LLMProviderInfo, TokenUsage, OpenAIEstimation
+
+log = structlog.get_logger()
+
 
 class OpenAIEstimator:
     OPENAI_PRICING = {
@@ -63,6 +68,7 @@ class OpenAIEstimator:
         return round(input_tokens * prompt_rate + output_tokens * completion_rate, 6)
 
     def estimate(self,system_prompt: str, user_prompt: str) -> OpenAIEstimation:
+        log.info("OpenAIEstimator estimate called", model=self.settings.LLM_MODEL)
         response = self.client.responses.create(
             model=self.settings.LLM_MODEL,
             instructions=system_prompt,
@@ -106,6 +112,7 @@ class OpenAIEstimator:
         raise RuntimeError("Respuesta de OpenAI inválida o inesperada.")
 
     def estimate_stream(self, system_prompt: str, user_prompt: str) -> Iterator[dict]:
+        log.info("OpenAIEstimator estimate_stream called", model=self.settings.LLM_MODEL)
         response = self.client.responses.create(
             model=self.settings.LLM_MODEL,
             instructions=system_prompt,

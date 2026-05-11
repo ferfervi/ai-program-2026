@@ -2,11 +2,12 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from app.config import settings
+from app.config import get_settings
 from app.main import app
 from app.schemas.llm_io import OpenAIEstimation
 from app.services.open_ai_service import OpenAIEstimator
 
+settings = get_settings()  
 
 def test_openai_estimator_returns_mocked_estimation(monkeypatch):
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "test-api-key", raising=False)
@@ -14,6 +15,8 @@ def test_openai_estimator_returns_mocked_estimation(monkeypatch):
 
     fake_response = MagicMock()
     fake_response.output_text = "Mocked estimation text"
+    fake_response.finish_reason = "unknown"
+    fake_response.usage = None
 
     fake_client = MagicMock()
     fake_client.responses.create.return_value = fake_response
@@ -29,6 +32,7 @@ def test_openai_estimator_returns_mocked_estimation(monkeypatch):
     assert result.token_usage.output_tokens == 0
     assert result.token_usage.total_tokens == 0
     assert result.token_usage.cost_usd == 0.0
+    assert result.finish_reason == "unknown"
 
     fake_client.responses.create.assert_called_once_with(
         model="gpt-4",

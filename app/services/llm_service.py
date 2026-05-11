@@ -191,7 +191,7 @@ def _invoke_lite_llm_stream(
     model_override: str | None,
     max_tokens: int,
     thinking_budget: int | None,
-) -> Iterator[str]:
+) -> Iterator[str | dict]:
     """Single seam through which every streamed LLM call passes. Tests monkeypatch this."""
     wrapper = get_litellm_wrapper()
     return wrapper.complete_stream(
@@ -245,7 +245,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
     settings = get_settings()
     provider = settings.LLM_PROVIDER.lower()
 
-    log.info("generating_estimation", provider=provider, model=settings.LLM_MODEL)
+    log.info("LLMService -generate estimation request", provider=provider, model=settings.LLM_MODEL)
 
     match provider:
         case "openai":
@@ -297,7 +297,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
             )
 
             log.info(
-                "generating_estimation",
+                "LLMService - LiteLLM invocaction",
                 model_override=opts.model,
                 preprocessing=opts.preprocessing,
                 example_format=opts.example_format,
@@ -364,6 +364,7 @@ def generate_estimation_stream(transcript: str) -> Iterator[dict]:
 
     settings = get_settings()
     provider = settings.LLM_PROVIDER.lower()
+    log.info("LLMService stream - generate estimation stream request", provider=provider, model=settings.LLM_MODEL)
 
     match provider:
         case "openai":
@@ -408,34 +409,37 @@ def generate_estimation_stream(transcript: str) -> Iterator[dict]:
 
             try:
                 estimation_text = ""
-                for delta in _invoke_lite_llm_stream(
+                stream_usage: dict = {}
+                for item in _invoke_lite_llm_stream(
                     system_prompt=system_prompt,
                     user_message=user_input,
                     model_override=None,
                     max_tokens=opts.max_tokens,
                     thinking_budget=opts.thinking_budget,
                 ):
-                    if delta:
-                        estimation_text += delta
+                    if isinstance(item, dict):
+                        stream_usage = item
+                    elif item:
+                        estimation_text += item
                         yield {
                             "type": "delta",
-                            "text": delta,
+                            "text": item,
                         }
 
                 yield {
                     "type": "done",
                     "estimation": estimation_text,
-                    "provider": "litellm",
-                    "model": opts.model or "default",
+                    "provider": stream_usage.get("provider", "litellm"),
+                    "model": stream_usage.get("model", opts.model or "default"),
                     "timestamp": datetime.utcnow().isoformat(),
                     "token_usage": {
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "total_tokens": 0,
-                        "cost_usd": 0.0,
+                        "input_tokens": stream_usage.get("input_tokens", 0),
+                        "output_tokens": stream_usage.get("output_tokens", 0),
+                        "total_tokens": stream_usage.get("total_tokens", 0),
+                        "cost_usd": stream_usage.get("cost_usd", 0.0),
                     },
                     "latency_ms": int((time.perf_counter() - t0) * 1000),
-                    "finish_reason": "unknown",
+                    "finish_reason": "stop",
                     "cache_hit": False,
                 }
             except Exception as exc:

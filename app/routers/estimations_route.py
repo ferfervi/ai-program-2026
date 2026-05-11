@@ -14,6 +14,26 @@ log = structlog.get_logger()
 router = APIRouter(tags=["estimations"])
 
 
+def _log_stream_event(event: dict) -> None:
+    event_type = event.get("type", "unknown")
+    if event_type == "done":
+        usage = event.get("token_usage", {})
+        log.info(
+            "stream_response_completed",
+            model=event.get("model"),
+            provider=event.get("provider"),
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+            cost_usd=usage.get("cost_usd"),
+            latency_ms=event.get("latency_ms"),
+            cache_hit=event.get("cache_hit"),
+        )
+    elif event_type == "delta":
+        log.debug("stream_delta_received", text_length=len(event.get("text", "")))
+    else:
+        log.warning("stream_unknown_event_type", event_type=event_type)
+
+
 @router.post("/estimate", response_model=EstimationResponse)
 async def estimate(request: EstimationRequest) -> EstimationResponse:
     """Generating a software project estimation based on the provided meeting transcription."""
@@ -38,7 +58,7 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
 async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
     """Stream model output as it is generated for OpenAI estimations."""
 
-    log.info("Received streaming estimation request", request=request.model_dump())
+    log.info("Router [/estimate/stream] request", request=request.model_dump())
 
     settings = get_settings()
     if settings.LLM_PROVIDER.lower() != "openai" and settings.LLM_PROVIDER.lower() != "lite_llm":
@@ -49,6 +69,7 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
 
     def event_generator():
         for event in generate_estimation_stream(request.transcription):
+            _log_stream_event(event)
             payload = json.dumps(event)
             yield f"event: {event.get('type', 'message')}\n"
             yield f"data: {payload}\n\n"

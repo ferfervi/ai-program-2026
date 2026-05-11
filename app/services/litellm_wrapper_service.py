@@ -121,7 +121,10 @@ class LiteLLMMWrapperService:
         """Single LLM call with cache + (optional) fallback. Returns the legacy dict shape
         plus ``cache_hit`` and ``cost_usd`` fields.
         """
+
         cache_key_model = model_override or self.primary_model
+
+        log.info("LiteLLm service called", model=cache_key_model, thinking_budget=thinking_budget)
         cache_key = EstimationCache.make_key(
             system_prompt=system_prompt,
             user_message=user_message,
@@ -186,15 +189,19 @@ class LiteLLMMWrapperService:
         user_message: str,
         model_override: str | None = None,
         max_tokens: int = 4000,
-    ) -> Iterator[str]:
-        """Yield text chunks as they arrive from the model.
+    ) -> Iterator[str | dict[str, Any]]:
+        """Yield text chunks as they arrive, then a final usage dict.
 
-        Cache hits replay the cached estimation as a single chunk so the client UX
-        stays consistent. Cache misses stream live and the full text is cached
-        once the stream finishes (without ``cost_usd`` since LiteLLM does not
-        always report token usage for streaming calls).
+        The last item yielded is always a dict with keys: input_tokens,
+        output_tokens, total_tokens, cost_usd, model, provider. Callers must
+        check ``isinstance(item, dict)`` to distinguish it from text chunks.
+
+        Cache hits replay the cached estimation as a single chunk followed by
+        the cached usage dict so the caller interface stays consistent.
         """
         cache_key_model = model_override or self.primary_model
+        log.info("LiteLLM service stream called", model=cache_key_model)
+
         cache_key = EstimationCache.make_key(
             system_prompt=system_prompt,
             user_message=user_message,
@@ -206,6 +213,15 @@ class LiteLLMMWrapperService:
         if cached:
             log.info("stream_cache_hit", chars=len(cached.get("estimation", "")))
             yield cached.get("estimation", "")
+            cached_usage = cached.get("usage", {})
+            yield {
+                "input_tokens": cached_usage.get("input_tokens", 0),
+                "output_tokens": cached_usage.get("output_tokens", 0),
+                "total_tokens": cached_usage.get("total_tokens", 0),
+                "cost_usd": cached.get("cost_usd", 0.0),
+                "model": _normalise_model_name(cached.get("model", self.primary_model)),
+                "provider": cached.get("provider", "unknown"),
+            }
             return
 
         messages = [
@@ -226,9 +242,13 @@ class LiteLLMMWrapperService:
         )
         t0 = time.perf_counter()
         full_text: list[str] = []
+        raw_usage = None
         try:
             response = self._dispatch(model_override=model_override, **kwargs)
             for chunk in response:
+                # LiteLLM sets usage on the final chunk when stream_options include_usage is on
+                if getattr(chunk, "usage", None) is not None:
+                    raw_usage = chunk.usage
                 delta = _extract_delta(chunk)
                 if delta:
                     full_text.append(delta)
@@ -245,18 +265,45 @@ class LiteLLMMWrapperService:
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
         rendered = "".join(full_text)
-        log.info("llm_stream_completed", latency_ms=latency_ms, chars=len(rendered))
+        resolved_model = _normalise_model_name(model_override or self.primary_model)
 
+        if raw_usage is not None:
+            input_tokens = getattr(raw_usage, "prompt_tokens", 0) or 0
+            output_tokens = getattr(raw_usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(raw_usage, "total_tokens", input_tokens + output_tokens) or (input_tokens + output_tokens)
+            cost = _estimate_cost(resolved_model, input_tokens, output_tokens)
+        else:
+            input_tokens = output_tokens = total_tokens = 0
+            cost = 0.0
+
+        stream_usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost,
+            "model": resolved_model,
+            "provider": _provider_from_model(resolved_model),
+        }
+        yield stream_usage
+
+        log.info(
+            "llm_stream_completed",
+            latency_ms=latency_ms,
+            chars=len(rendered),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+        )
         self.cache.set(
             cache_key,
             {
                 "estimation": rendered,
-                "model": model_override or self.primary_model,
-                "provider": _provider_from_model(model_override or self.primary_model),
+                "model": resolved_model,
+                "provider": _provider_from_model(resolved_model),
                 "finish_reason": "stop",
-                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens, "total_tokens": total_tokens},
                 "latency_ms": latency_ms,
-                "cost_usd": 0.0,
+                "cost_usd": cost,
             },
         )
 
@@ -279,6 +326,7 @@ class LiteLLMMWrapperService:
         }
         if stream:
             kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
 
         if thinking_budget is not None:
             target_model = model_override or self.primary_model
