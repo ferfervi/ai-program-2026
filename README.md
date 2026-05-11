@@ -4,41 +4,71 @@ Estimator CAG is a FastAPI service for generating software project estimates fro
 
 ## Launch the project
 
-### Execution with Docker
+### Local execution (recommended)
 
-Use Docker Compose to build and start the service in a container.
+**Step 1** — Start Redis (required for caching):
+
+```bash
+docker-compose up redis
+```
+
+**Step 2** — Start the FastAPI backend:
+
+```bash
+make server
+```
+
+**Step 3** — Start the UI:
+
+```bash
+make ui-form
+```
+
+The API is available at `http://localhost:8000`. The UI is at `http://localhost:8501`.
+
+### With Docker
+
+Starts the API and Redis together (no separate Redis step needed):
+
+Note: This may not be working fully and need some fix to make it work with the UI on docker
 
 ```bash
 make start-docker
 ```
 
-This runs:
-
-```bash
-docker-compose up --build -d
-```
-
-To stop the Docker stack:
+To stop:
 
 ```bash
 make stop-docker
 ```
 
-### Local execution without Docker
+## Streamlit UIs
 
-Run the app locally with the project's Python tooling.
+Two separate UIs are available. Both connect to the same backend.
 
-```bash
-make serve
-```
+### Form UI (recommended)
 
-This runs:
+Structured form interface with explicit controls for project type, detail level, and output format. Supports both streaming and blocking calls via a toggle.
 
 ```bash
-uv run uvicorn app.main:app --reload
+make ui-form
 ```
 
-The API is available at `http://localhost:8000`.
+### Chat UI
+
+Conversational interface — type a description and get an estimate in a chat thread.
+
+```bash
+make ui
+```
+
+Both start the Streamlit app at `http://localhost:8501`.
+
+Both UIs connect to `http://localhost:8000` by default. Override with the `API_URL` environment variable:
+
+```bash
+API_URL=http://custom-api:8000 streamlit run streamlit_app_form.py
+```
 
 ## Health check
 
@@ -46,19 +76,17 @@ The API is available at `http://localhost:8000`.
 make health
 ```
 
-This sends a request to `http://localhost:8000/health` and verifies that it returns `200`.
-
 ## Run a sample estimation request
 
 ```bash
 make estimate
 ```
 
-This sends a `POST` request to `http://localhost:8000/api/v1/estimate` with the transcript loaded from:
+Sends a `POST` to `http://localhost:8000/api/v1/estimate` using the description from:
 
 - `app/data/samples/sample_request_transcription.md`
 
-If you want to use a different transcript file, pass the path with `TRANSCRIPTION_FILE`:
+Override the file:
 
 ```bash
 make estimate TRANSCRIPTION_FILE=app/data/another_transcription.md
@@ -66,112 +94,97 @@ make estimate TRANSCRIPTION_FILE=app/data/another_transcription.md
 
 ## Available Make targets
 
-### Docker targets
-
-- `make start-docker` - Build and start the service with Docker Compose
-- `make stop-docker` - Stop the Compose services
-
-### Local targets
-
-- `make serve` - Start the FastAPI backend server with auto-reload
-- `make ui` - Start the Streamlit UI application
-- `make test` - Run the test suite
-
-### Common targets
-
-- `make estimate` - Send a sample estimation request to the endpoint
-- `make health` - Check the health endpoint
+| Target | Description |
+|---|---|
+| `make server` | Start the FastAPI backend with auto-reload |
+| `make ui` | Start the chat Streamlit UI |
+| `make ui-form` | Start the form Streamlit UI |
+| `make test` | Run the test suite |
+| `make health` | Check `/health` endpoint |
+| `make estimate` | Send a sample request |
+| `make start-docker` | Build and start API + Redis with Docker Compose |
+| `make stop-docker` | Stop Docker Compose services |
+| `make stop` | Kill local uvicorn process |
 
 ## Relevant endpoints
 
-- `GET /health` - Service health status
-- `POST /api/v1/estimate` - Generate an estimate from the JSON body transcript (full response)
-- `POST /api/v1/estimate/stream` - Generate an estimate with server-sent events (SSE) streaming
-- `GET /docs` - Automatic Swagger documentation
+- `GET /health` — Service health status
+- `POST /api/v1/estimate` — Generate an estimate (full blocking response)
+- `POST /api/v1/estimate/stream` — Generate an estimate with SSE streaming
+- `GET /docs` — Swagger documentation
+
+### Request body
+
+Both endpoints accept the same JSON body:
+
+```json
+{
+  "description": "Meeting transcript or project requirements text (min 20 chars)",
+  "project_type": "web_saas",
+  "detail_level": "medium",
+  "output_format": "phases_table"
+}
+```
+
+**`project_type`**: `web_saas` · `mobile_app` · `internal_tool` · `data_pipeline`
+
+**`detail_level`**: `summary` · `medium` · `detailed`
+
+**`output_format`**: `phases_table` · `line_items` · `narrative`
 
 ## Streaming responses
 
-The `/api/v1/estimate/stream` endpoint returns estimation responses using **Server-Sent Events (SSE)** format. This enables real-time streaming of the generated text as it is produced by the LLM.
-
-### How it works
-
-1. Client sends a `POST` request to `/api/v1/estimate/stream` with JSON body: `{"transcription": "...", "thread_id": "..."}`
-2. Server starts streaming events as they arrive from the LLM provider
-3. Each event has `event:` type and `data:` payload (JSON)
+The `/api/v1/estimate/stream` endpoint returns **Server-Sent Events (SSE)**:
 
 ### Event types
 
-- `event: delta` - Partial text chunk (streaming in progress)
-  - `text`: A portion of the generated estimation
-- `event: done` - Final completion event with metadata
-  - `estimation`: Full accumulated estimation text
-  - `model`: Model name used
-  - `provider`: LLM provider ("openai", "anthropic")
-  - `timestamp`: ISO-8601 timestamp
-  - `token_usage`: Object with `input_tokens`, `output_tokens`, `total_tokens`, `cost_usd`
+- `event: delta` — Partial text chunk
+  - `text`: portion of the generated estimation
+- `event: done` — Final event with metadata
+  - `estimation`: full accumulated estimation text
+  - `model`, `provider`: model and provider used
+  - `token_usage`: `{ input_tokens, output_tokens, total_tokens, cost_usd }`
+  - `latency_ms`: server-side total latency
+  - `cache_hit`: `true` if the response was served from Redis cache
 
-### Example usage with curl
+### Example with curl
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/estimate/stream \
   -H "Accept: text/event-stream" \
   -H "Content-Type: application/json" \
-  -d '{"transcription":"Build a landing page with contact form", "thread_id":"abc-123"}'
+  -d '{
+    "description": "Build a landing page with contact form and HubSpot integration",
+    "project_type": "web_saas",
+    "detail_level": "medium",
+    "output_format": "phases_table"
+  }'
 ```
-
-### Streamlit UI integration
-
-The Streamlit application (`streamlit_app.py`) consumes this streaming endpoint to:
-- Display real-time text generation in the chat interface
-- Show a live progress indicator while the LLM generates the response
-- Capture token usage and cost metrics upon completion
-- Display debug metadata in an expandable info panel
 
 ## Project structure
 
-- `streamlit_app.py` - Interactive Streamlit UI for project estimation with real-time SSE streaming
-- `app/main.py` - FastAPI entrypoint
-- `app/routers/estimations_route.py` - Estimation routes for both standard and streaming endpoints
-- `app/services/llm_service.py` - LLM provider request logic and prompt building
-- `app/services/open_ai_service.py` - OpenAI API integration with streaming support and cost estimation
-- `app/services/anthropic_service.py` - Anthropic API integration
-- `app/config.py` - Settings-based configuration
-- `app/schemas/llm_io.py` - Request/response schemas including token usage and cost
-- `app/data/samples/sample_request_transcription.md` - Default sample transcript
-
-## Streamlit UI
-
-The Streamlit application provides an interactive chat interface for generating project estimates in real-time.
-
-### Running the UI
-
-```bash
-make ui
 ```
-
-This starts the Streamlit app at `http://localhost:8501`.
-
-### Features
-
-- **Real-time streaming**: See estimations appear character-by-character as the LLM generates them
-- **Token metrics**: Display input/output token counts and estimated cost for each estimation
-- **Session management**: Thread ID tracking and conversation history
-- **System prompt visualization**: View the active system prompt and injected context examples
-- **Debug info**: Expandable metadata panel showing model, provider, and token usage details
-- **Sidebar controls**: Clear chat, start new session, and test backend connectivity
-
-### Configuration
-
-The UI connects to the FastAPI backend at `http://localhost:8000` by default. Override with the `API_URL` environment variable:
-
-```bash
-API_URL=http://custom-api:8000 streamlit run streamlit_app.py
-```
-
-## Notes
-
-Make sure the FastAPI backend server is running before executing estimation requests or starting the Streamlit UI:
-
-```bash
-make server
+streamlit_app.py          # Chat UI — conversational interface
+streamlit_app_form.py     # Form UI — structured form with streaming toggle
+app/
+  main.py                 # FastAPI entrypoint
+  routers/
+    estimations_route.py  # /estimate and /estimate/stream endpoints
+  services/
+    llm_service.py        # Provider orchestration (generate_estimation, generate_estimation_stream)
+    litellm_wrapper_service.py  # LiteLLM with fallback, Redis cache, cost tracking
+    open_ai_service.py    # OpenAI SDK integration (streaming + cost)
+    anthropic_service.py  # Anthropic SDK integration
+  prompts/
+    loader.py             # render_estimation_prompt() — Jinja2 template renderer
+    estimation/v1/        # system.j2, user.j2, examples.j2
+  schemas/
+    request_io.py         # EstimationRequest, EstimationResponse
+    estimation_io.py      # ProjectType, DetailLevel, OutputFormat enums
+    llm_io.py             # LLMInputModel, TokenUsage, LLMEstimation, …
+  context/
+    examples.py           # ESTIMATION_EXAMPLES few-shot data
+  config.py               # Settings (pydantic-settings, .env)
+  data/samples/           # Sample transcript files
+tests/                    # pytest test suite
 ```

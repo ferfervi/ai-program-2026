@@ -6,16 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Development
-make serve          # Start FastAPI server with auto-reload (port 8000)
-make ui             # Start Streamlit UI (streamlit_app.py)
+make server         # Start FastAPI server with auto-reload (port 8000)
+make ui             # Start chat Streamlit UI (streamlit_app.py)
+make ui-form        # Start form Streamlit UI (streamlit_app_form.py)
 
 # Testing & health
 make test           # Run pytest -v
 make health         # GET /health
-make estimate       # POST /api/v1/estimate with sample transcription
+make estimate       # POST /api/v1/estimate with sample description
 
 # Docker
-make start-docker   # docker compose up --build
+make start-docker   # docker compose up --build (API + Redis)
 make stop-docker    # docker compose down
 make stop           # Kill local uvicorn process
 ```
@@ -24,13 +25,21 @@ Run a single test: `uv run pytest tests/health_test.py -v`
 
 Dependencies are managed with `uv` (Python 3.11+). The lock file is `uv.lock`.
 
+## Local development (recommended)
+
+```bash
+docker-compose up redis   # start Redis (required for caching)
+make server               # start FastAPI on :8000
+make ui-form              # start form UI on :8501 (recommended)
+```
+
 ## Environment
 
 Copy `.env.example` to `.env`. Required: at least one of `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Key settings:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LLM_PROVIDER` | `openai` | `openai`, `anthropic`, or `litellm` |
+| `LLM_PROVIDER` | `openai` | `openai`, `anthropic`, or `lite_llm` |
 | `LLM_MODEL` | `gpt-4o-mini` | model name for provider |
 | `PRIMARY_MODEL` | — | LiteLLM primary (e.g. `openai/gpt-4o-mini`) |
 | `FALLBACK_MODEL` | — | LiteLLM fallback model |
@@ -41,51 +50,72 @@ Copy `.env.example` to `.env`. Required: at least one of `OPENAI_API_KEY` or `AN
 
 ## Architecture
 
-This is a FastAPI service that takes meeting transcriptions and generates software project estimates using LLMs.
+This is a FastAPI service that takes structured estimation requests and generates software project estimates using LLMs.
+
+### Request body (`EstimationRequest`)
+
+```json
+{
+  "description": "...",
+  "project_type": "web_saas | mobile_app | internal_tool | data_pipeline",
+  "detail_level": "summary | medium | detailed",
+  "output_format": "phases_table | line_items | narrative"
+}
+```
 
 ### Request flow
 
 ```
 POST /api/v1/estimate  (or /estimate/stream for SSE)
-  → EstimationRequest (transcription, optional thread_id)
-  → llm_service.generate_estimation()
-      → build_system_prompt()   # role + rates + few-shot examples
+  → EstimationRequest (description, project_type, detail_level, output_format)
+  → render_estimation_prompt()   # Jinja2 → (system_prompt, user_prompt)
+  → llm_service.generate_estimation(LLMInputModel)
       → optional preprocessing  # "none" | "inline_cleaning" | "two_phase"
       → route to provider:
           openai_service  /  anthropic_service  /  litellm_wrapper_service
-  → EstimationResponse (estimation text, model, provider, token usage, cost, cache_hit)
+  → EstimationResponse (text, model, provider, usage, cost_usd, latency_ms, cache_hit)
 ```
+
+### Prompt rendering (`app/prompts/loader.py`)
+
+`render_estimation_prompt(request)` renders Jinja2 templates from `app/prompts/estimation/v1/`:
+- `system.j2` — role, output format instructions, detail level instructions, `{% include "examples.j2" %}`
+- `user.j2` — wraps `description` in `<project_description>` tags
+- `examples.j2` — few-shot estimation examples
 
 ### LLM service (`app/services/llm_service.py`)
 
-Central orchestration layer. `generate_estimation()` and `generate_estimation_stream()` build the system prompt (assembling role definition, hourly rates — 62.50 EUR/hr dev, 50 EUR/hr design — and few-shot examples from `app/context/examples.py`), optionally pre-processes the transcription, then dispatches to the chosen provider.
+Central orchestration layer. `generate_estimation(llm_input)` and `generate_estimation_stream(llm_input)` accept an `LLMInputModel(system, user)` and dispatch to the configured provider.
 
 ### LiteLLM wrapper (`app/services/litellm_wrapper_service.py`)
 
-Preferred provider path. Wraps LiteLLM with:
+Preferred provider path (`LLM_PROVIDER=lite_llm`). Wraps LiteLLM with:
 - **Automatic fallback**: `PRIMARY_MODEL` → `FALLBACK_MODEL` on failure
 - **Redis cache**: keyed on SHA-256(system_prompt + user_msg + model + max_tokens + thinking_budget); exact-match only
 - **Cost tracking**: works for OpenAI and Anthropic models
+- **Streaming**: `complete_stream()` yields `str` chunks then a final `dict` with token usage and `cache_hit`
 
 ### Provider integrations
 
 - `app/services/open_ai_service.py` — OpenAI SDK, streaming, token/cost calculation
 - `app/services/anthropic_service.py` — Anthropic SDK, basic (non-streaming)
-- Both are bypassed when `LLM_PROVIDER=litellm`
+- Both are bypassed when `LLM_PROVIDER=lite_llm`
 
 ### Schemas (`app/schemas/`)
 
 - `request_io.py` — `EstimationRequest`, `EstimationResponse`
-- `estimation_io.py` — estimation-specific Pydantic models
-- `llm_io.py` — internal LLM service models (token usage, cost, cache metadata)
+- `estimation_io.py` — `ProjectType`, `DetailLevel`, `OutputFormat` enums
+- `llm_io.py` — internal LLM service models (`LLMInputModel`, `TokenUsage`, `LLMEstimation`, …)
 
 ### Streaming (SSE)
 
 `POST /api/v1/estimate/stream` returns Server-Sent Events:
 - `event: delta` — `{"text": "..."}` partial chunk
-- `event: done` — full `EstimationResponse` JSON with token/cost summary
+- `event: done` — full response JSON including `estimation`, `token_usage`, `latency_ms`, `cache_hit`
 
-The Streamlit UI (`streamlit_app.py`) consumes this stream and renders chunks in real time. Configure the API target via `API_URL` env var.
+Two Streamlit UIs consume this:
+- `streamlit_app_form.py` — structured form with streaming toggle (`make ui-form`) **← recommended**
+- `streamlit_app.py` — chat interface (`make ui`)
 
 ### Caching (`app/services/cache_service.py`)
 
