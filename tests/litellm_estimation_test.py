@@ -50,14 +50,15 @@ def _make_blocking_response(content="Estimation text", model="gpt-4o-mini",
     return response
 
 
-def _make_text_chunk(text):
+def _make_text_chunk(text, model="gpt-4o-mini"):
     chunk = MagicMock()
     chunk.usage = None
+    chunk.model = model
     chunk.choices[0].delta.content = text
     return chunk
 
 
-def _make_usage_chunk(prompt_tokens, completion_tokens):
+def _make_usage_chunk(prompt_tokens, completion_tokens, model="gpt-4o-mini"):
     usage = MagicMock()
     usage.prompt_tokens = prompt_tokens
     usage.completion_tokens = completion_tokens
@@ -65,6 +66,7 @@ def _make_usage_chunk(prompt_tokens, completion_tokens):
 
     chunk = MagicMock()
     chunk.usage = usage
+    chunk.model = model
     chunk.choices[0].delta.content = None
     return chunk
 
