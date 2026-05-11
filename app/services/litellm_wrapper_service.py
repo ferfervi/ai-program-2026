@@ -131,6 +131,7 @@ class LiteLLMMWrapperService:
         )
         cached = self.cache.get(cache_key)
         if cached:
+            log.info("complete_cache_hit", key_prefix=cache_key[:24])
             return {**cached, "cache_hit": True}
 
         messages = [
