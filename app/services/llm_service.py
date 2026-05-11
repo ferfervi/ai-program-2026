@@ -191,15 +191,14 @@ def _invoke_lite_llm_stream(
     model_override: str | None,
     max_tokens: int,
     thinking_budget: int | None,
-) -> dict[str, Any]:
-    """Single seam through which every LLM call passes. Tests monkeypatch this."""
+) -> Iterator[str]:
+    """Single seam through which every streamed LLM call passes. Tests monkeypatch this."""
     wrapper = get_litellm_wrapper()
-    return wrapper.complete(
+    return wrapper.complete_stream(
         system_prompt=system_prompt,
         user_message=user_message,
         model_override=model_override,
         max_tokens=max_tokens,
-        thinking_budget=thinking_budget,
     )
 
 # ---------------------------------------------------------------------------
@@ -368,7 +367,7 @@ def generate_estimation_stream(transcript: str) -> Iterator[dict]:
 
     match provider:
         case "openai":
-            return OpenAIEstimator().estimate_stream(system_prompt, user_prompt)
+            yield from OpenAIEstimator().estimate_stream(system_prompt, user_prompt)
 
         case "anthropic":
             raise ValueError("Streaming sólo está disponible para el proveedor OpenAI & lite_llm.")
@@ -408,41 +407,36 @@ def generate_estimation_stream(transcript: str) -> Iterator[dict]:
             )
 
             try:
-                result = _invoke_lite_llm_stream(
+                estimation_text = ""
+                for delta in _invoke_lite_llm_stream(
                     system_prompt=system_prompt,
                     user_message=user_input,
                     model_override=None,
-                    max_tokens=EXTRACTION_MAX_TOKENS,
+                    max_tokens=opts.max_tokens,
                     thinking_budget=opts.thinking_budget,
-                )
-
-                log.info("llm_response result", **result)
-
-                result["usage"]["preprocessing_input_tokens"] = prep_usage["input"]
-                result["usage"]["preprocessing_output_tokens"] = prep_usage["output"]
-                result["preprocessing"] = opts.preprocessing
-                result["extracted_requirements"] = extracted_requirements
-                result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
-                result["cost_usd"] = round(float(result.get("cost_usd", 0.0)) + prep_cost, 6)
-
-                # ``cache_hit`` is whatever the wrapper returned for the main estimation call.
-                result.setdefault("cache_hit", False)
+                ):
+                    if delta:
+                        estimation_text += delta
+                        yield {
+                            "type": "delta",
+                            "text": delta,
+                        }
 
                 yield {
                     "type": "done",
-                    "estimation": result.get("estimation", ""),
+                    "estimation": estimation_text,
                     "provider": "litellm",
                     "model": opts.model or "default",
                     "timestamp": datetime.utcnow().isoformat(),
                     "token_usage": {
-                        "input_tokens": result["usage"].get("input", 0),
-                        "output_tokens": result["usage"].get("output", 0),
-                        "total_tokens": result["usage"].get("input", 0) + result["usage"].get("output", 0),
-                        "cost_usd": result.get("cost_usd", 0.0),
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "cost_usd": 0.0,
                     },
-                    "latency_ms": result["latency_ms"],
-                    "finish_reason": result.get("finish_reason", "unknown"),
-                    "cache_hit": result.get("cache_hit", False),
+                    "latency_ms": int((time.perf_counter() - t0) * 1000),
+                    "finish_reason": "unknown",
+                    "cache_hit": False,
                 }
             except Exception as exc:
                 log.error("llm_call_failed", error=str(exc), error_type=type(exc).__name__)
