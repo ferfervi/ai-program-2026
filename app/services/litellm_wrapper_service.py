@@ -189,6 +189,7 @@ class LiteLLMMWrapperService:
         user_message: str,
         model_override: str | None = None,
         max_tokens: int = 4000,
+        thinking_budget: int | None = None,
     ) -> Iterator[str | dict[str, Any]]:
         """Yield text chunks as they arrive, then a final usage dict.
 
@@ -207,7 +208,7 @@ class LiteLLMMWrapperService:
             user_message=user_message,
             model=cache_key_model,
             max_tokens=max_tokens,
-            thinking_budget=None,
+            thinking_budget=thinking_budget,
         )
         cached = self.cache.get(cache_key)
         if cached:
@@ -221,6 +222,7 @@ class LiteLLMMWrapperService:
                 "cost_usd": cached.get("cost_usd", 0.0),
                 "model": _normalise_model_name(cached.get("model", self.primary_model)),
                 "provider": cached.get("provider", "unknown"),
+                "cache_hit": True,
             }
             return
 
@@ -231,7 +233,7 @@ class LiteLLMMWrapperService:
         kwargs = self._build_call_kwargs(
             messages=messages,
             max_tokens=max_tokens,
-            thinking_budget=None,
+            thinking_budget=thinking_budget,
             model_override=model_override,
             stream=True,
         )
@@ -286,6 +288,7 @@ class LiteLLMMWrapperService:
             "cost_usd": cost,
             "model": resolved_model,
             "provider": _provider_from_model(resolved_model),
+            "cache_hit": False,
         }
         yield stream_usage
 

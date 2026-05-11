@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -6,6 +6,7 @@ import app.services.llm_service as llm_service
 from app.schemas.llm_io import (
     AnthropicEstimation,
     LLMEstimation,
+    LLMInputModel,
     LLMProviderInfo,
     OpenAIEstimation,
     TokenUsage,
@@ -32,6 +33,10 @@ def _fake_settings(provider: str = "openai", model: str = "gpt-4o-mini"):
     s.LLM_PROVIDER = provider
     s.LLM_MODEL = model
     return s
+
+
+def _llm_input(system: str = "You are an estimator.", user: str = "Estimate this project.") -> LLMInputModel:
+    return LLMInputModel(system=system, user=user)
 
 
 # ---------------------------------------------------------------------------
@@ -78,10 +83,10 @@ class TestGenerateEstimation:
             finish_reason="stop",
         )
         monkeypatch.setattr(
-            llm_service.OpenAIEstimator, "estimate", lambda self, s, u: fake
+            llm_service.OpenAIEstimator, "estimate", lambda *_: fake
         )
 
-        result = generate_estimation("some transcript")
+        result = generate_estimation(_llm_input())
 
         assert isinstance(result, LLMEstimation)
         assert result.estimation == "Estimated"
@@ -98,10 +103,10 @@ class TestGenerateEstimation:
             token_usage=_token_usage(),
         )
         monkeypatch.setattr(
-            llm_service.AnthropicEstimator, "estimate", lambda self, msgs: fake
+            llm_service.AnthropicEstimator, "estimate", lambda *_: fake
         )
 
-        result = generate_estimation("some transcript")
+        result = generate_estimation(_llm_input())
 
         assert isinstance(result, LLMEstimation)
         assert result.estimation == "Anthropic result"
@@ -120,9 +125,9 @@ class TestGenerateEstimation:
             "cost_usd": 0.001,
             "cache_hit": False,
         }
-        monkeypatch.setattr(llm_service, "_invoke_lite_llm", lambda **kw: fake_result)
+        monkeypatch.setattr(llm_service, "_invoke_lite_llm", lambda **_: fake_result)
 
-        result = generate_estimation("some transcript")
+        result = generate_estimation(_llm_input())
 
         assert isinstance(result, LLMEstimation)
         assert result.estimation == "LiteLLM result"
@@ -143,9 +148,9 @@ class TestGenerateEstimation:
             "cost_usd": 0.0,
             "cache_hit": True,
         }
-        monkeypatch.setattr(llm_service, "_invoke_lite_llm", lambda **kw: fake_result)
+        monkeypatch.setattr(llm_service, "_invoke_lite_llm", lambda **_: fake_result)
 
-        result = generate_estimation("transcript")
+        result = generate_estimation(_llm_input())
 
         assert result.cache_hit is True
 
@@ -158,7 +163,7 @@ class TestGenerateEstimation:
         )
 
         with pytest.raises(LLMServiceError):
-            generate_estimation("transcript")
+            generate_estimation(_llm_input())
 
     def test_unknown_provider_raises_value_error(self, monkeypatch):
         monkeypatch.setattr(
@@ -166,7 +171,7 @@ class TestGenerateEstimation:
         )
 
         with pytest.raises(ValueError):
-            generate_estimation("transcript")
+            generate_estimation(_llm_input())
 
 
 # ---------------------------------------------------------------------------
@@ -184,10 +189,10 @@ class TestGenerateEstimationStream:
             {"type": "done", "estimation": "Hello world", "token_usage": {}},
         ]
         monkeypatch.setattr(
-            llm_service.OpenAIEstimator, "estimate_stream", lambda self, s, u: iter(fake_events)
+            llm_service.OpenAIEstimator, "estimate_stream", lambda *_: iter(fake_events)
         )
 
-        events = list(generate_estimation_stream("transcript"))
+        events = list(generate_estimation_stream(_llm_input()))
 
         assert events[0] == {"type": "delta", "text": "Hello"}
         assert events[-1]["type"] == "done"
@@ -198,7 +203,7 @@ class TestGenerateEstimationStream:
         )
 
         with pytest.raises(ValueError):
-            list(generate_estimation_stream("transcript"))
+            list(generate_estimation_stream(_llm_input()))
 
     def test_lite_llm_yields_delta_events_from_text_chunks(self, monkeypatch):
         monkeypatch.setattr(
@@ -211,10 +216,10 @@ class TestGenerateEstimationStream:
              "model": "gpt-4o-mini", "provider": "openai"},
         ]
         monkeypatch.setattr(
-            llm_service, "_invoke_lite_llm_stream", lambda **kw: iter(stream_items)
+            llm_service, "_invoke_lite_llm_stream", lambda **_: iter(stream_items)
         )
 
-        events = list(generate_estimation_stream("transcript"))
+        events = list(generate_estimation_stream(_llm_input()))
 
         delta_events = [e for e in events if e["type"] == "delta"]
         done_events = [e for e in events if e["type"] == "done"]
@@ -234,10 +239,10 @@ class TestGenerateEstimationStream:
              "model": "gpt-4o-mini", "provider": "openai"},
         ]
         monkeypatch.setattr(
-            llm_service, "_invoke_lite_llm_stream", lambda **kw: iter(stream_items)
+            llm_service, "_invoke_lite_llm_stream", lambda **_: iter(stream_items)
         )
 
-        events = list(generate_estimation_stream("transcript"))
+        events = list(generate_estimation_stream(_llm_input()))
         done = next(e for e in events if e["type"] == "done")
 
         assert done["token_usage"]["input_tokens"] == 80
@@ -257,7 +262,7 @@ class TestGenerateEstimationStream:
         )
 
         with pytest.raises(LLMServiceError):
-            list(generate_estimation_stream("transcript"))
+            list(generate_estimation_stream(_llm_input()))
 
     def test_unknown_provider_raises_value_error(self, monkeypatch):
         monkeypatch.setattr(
@@ -265,4 +270,4 @@ class TestGenerateEstimationStream:
         )
 
         with pytest.raises(ValueError):
-            list(generate_estimation_stream("transcript"))
+            list(generate_estimation_stream(_llm_input()))

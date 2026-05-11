@@ -1,5 +1,10 @@
 from pydantic import BaseModel
 
+
+class LLMInputModel(BaseModel):
+    system: str
+    user: str
+    
 # Interface models LLM 
 class LLMServiceError(Exception):
     """Raised when the LLM provider call fails."""

@@ -7,6 +7,9 @@ from fastapi.responses import StreamingResponse
 from app.config import get_settings
 from app.services.llm_service import generate_estimation, generate_estimation_stream
 from app.schemas.request_io import EstimationRequest, EstimationResponse
+from app.schemas.llm_io import LLMInputModel
+from app.prompts.loader import render_estimation_prompt
+
 
 import structlog
 log = structlog.get_logger()
@@ -39,8 +42,10 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
     """Generating a software project estimation based on the provided meeting transcription."""
 
     log.info("Received estimation request", request=request.model_dump())
+    system, user = render_estimation_prompt(request)
+    llm_input_model = LLMInputModel(system=system, user=user)
     
-    llm_estimation = generate_estimation(request.description)
+    llm_estimation = generate_estimation(llm_input=llm_input_model)
 
     return EstimationResponse(
         text=llm_estimation.estimation,
@@ -59,6 +64,8 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
     """Stream model output as it is generated for OpenAI estimations."""
 
     log.info("Router [/estimate/stream] request", request=request.model_dump())
+    system, user = render_estimation_prompt(request)
+    llm_input_model = LLMInputModel(system=system, user=user)
 
     settings = get_settings()
     if settings.LLM_PROVIDER.lower() != "openai" and settings.LLM_PROVIDER.lower() != "lite_llm":
@@ -68,7 +75,7 @@ async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
         )
 
     def event_generator():
-        for event in generate_estimation_stream(request.description):
+        for event in generate_estimation_stream(llm_input=llm_input_model):
             _log_stream_event(event)
             payload = json.dumps(event)
             yield f"event: {event.get('type', 'message')}\n"

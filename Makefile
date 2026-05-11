@@ -3,7 +3,7 @@ HEALTH_URL ?= http://localhost:8000/health
 TRANSCRIPTION_FILE ?= app/data/samples/sample_request_transcription.md
 
 estimate:
-	@python -c 'from pathlib import Path; import json, subprocess; transcription = Path("$(TRANSCRIPTION_FILE)").read_text(encoding="utf-8").strip(); payload = json.dumps({"transcription": transcription}); subprocess.run(["curl", "-sS", "-X", "POST", "$(API_URL)", "-H", "Content-Type: application/json", "-d", payload], check=True)'
+	@python -c 'from pathlib import Path; import json, subprocess; description = Path("$(TRANSCRIPTION_FILE)").read_text(encoding="utf-8").strip(); payload = json.dumps({"description": description, "project_type": "web_saas", "detail_level": "medium", "output_format": "phases_table"}); subprocess.run(["curl", "-sS", "-X", "POST", "$(API_URL)", "-H", "Content-Type: application/json", "-d", payload], check=True)'
 
 health:
 	@curl -sS "$(HEALTH_URL)"
@@ -22,6 +22,9 @@ server:
 
 ui:
 	@streamlit run streamlit_app.py
+
+ui-form:
+	@streamlit run streamlit_app_form.py
 
 
 stop:

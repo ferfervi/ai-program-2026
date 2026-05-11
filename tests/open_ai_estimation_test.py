@@ -101,7 +101,7 @@ def test_streaming_endpoint_returns_chunked_events(monkeypatch):
 
     monkeypatch.setattr(
         "app.routers.estimations_route.generate_estimation_stream",
-        lambda transcription: fake_event_iterator,
+        lambda llm_input: fake_event_iterator,
         raising=False,
     )
 
