@@ -6,8 +6,9 @@ from typing import Dict, List, Optional
 import requests
 import streamlit as st
 
-from app.services.llm_service import build_system_prompt
-from app.context.examples import ESTIMATION_EXAMPLES
+from app.prompts.loader import render_estimation_prompt
+from app.schemas.request_io import EstimationRequest
+from app.schemas.estimation_io import ProjectType, DetailLevel, OutputFormat
 
 API_URL = os.getenv("API_URL", "http://localhost:8000/api/v1/estimate")
 STREAM_API_URL = f"{API_URL}/stream"
@@ -47,6 +48,10 @@ def _init_session():
         st.session_state.last_call_metrics = {}
     if "last_result" not in st.session_state:
         st.session_state.last_result = ""
+    if "last_user_prompt" not in st.session_state:
+        st.session_state.last_user_prompt = ""
+    if "last_system_prompt" not in st.session_state:
+        st.session_state.last_system_prompt = ""
 
 
 # ---------------------------------------------------------------------------
@@ -77,16 +82,20 @@ def _display_sidebar():
             st.caption("No metrics yet — submit a request first.")
 
         st.divider()
-        st.markdown("### Active system prompt")
-        st.text_area("System prompt", build_system_prompt(), height=200, disabled=True)
+        st.markdown("### Last system prompt")
+        if st.session_state.last_system_prompt:
+            st.text_area("System prompt", st.session_state.last_system_prompt, height=200, disabled=True)
+        else:
+            st.caption("Submit a request to see the rendered system prompt here.")
 
         st.divider()
-        st.markdown("### Few-shot examples")
-        for i, ex in enumerate(ESTIMATION_EXAMPLES, start=1):
-            with st.expander(f"Example {i}"):
-                st.markdown(f"**Meeting summary:** {ex.get('meeting_summary', '').strip()}")
-                st.markdown("**Estimation:**")
-                st.code(ex.get("estimation", "").strip())
+        st.markdown("### Last user prompt")
+        if st.session_state.last_user_prompt:
+            st.text_area("User prompt", st.session_state.last_user_prompt, height=120, disabled=True)
+        else:
+            st.caption("Submit a request to see the rendered user prompt here.")
+
+        st.divider()
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +269,16 @@ def main():
                 "detail_level": DETAIL_LEVEL_VALUES[DETAIL_LEVEL_LABELS.index(detail_level_label)],
                 "output_format": OUTPUT_FORMAT_LABELS[output_format_label],
             }
+            system_prompt, user_prompt = render_estimation_prompt(
+                EstimationRequest(
+                    description=payload["description"],
+                    project_type=ProjectType(payload["project_type"]),
+                    detail_level=DetailLevel(payload["detail_level"]),
+                    output_format=OutputFormat(payload["output_format"]),
+                )
+            )
+            st.session_state.last_system_prompt = system_prompt
+            st.session_state.last_user_prompt = user_prompt
             st.markdown("---")
             if streaming:
                 _stream_estimation(payload)

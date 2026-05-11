@@ -16,7 +16,6 @@ from typing import Any
 
 import structlog
 
-from app.context.examples import format_examples_for_prompt, select_examples
 from app.dependencies import get_litellm_wrapper
 from app.schemas.estimation_io import ExampleFormat, PreprocessingMode
 from app.schemas.llm_io import LLMInputModel
@@ -102,65 +101,6 @@ class GenerationOptions:
     thinking_budget: int | None = None
 
 
-# def build_system_prompt() -> str:
-#     """Construye el prompt de sistema con el rol y los ejemplos de estimación."""
-#     instructions = (
-#         "Eres un estimador de software experto. Genera una estimación detallada y práctica "
-#         "basada en ejemplos previos y en la transcripción de una nueva reunión. "
-#         "Usa los ejemplos como referencia del formato y la profundidad esperada. "
-#         "Tu respuesta debe incluir un desglose de tareas, un total estimado, equipo recomendado "
-#         "y duración estimada."
-#     )
-
-#     examples = []
-#     for index, example in enumerate(ESTIMATION_EXAMPLES, start=1):
-#         summary = example.get("meeting_summary", "").strip()
-#         estimation = example.get("estimation", "").strip()
-#         examples.append(
-#             f"Ejemplo {index}:\nResumen de la reunión: {summary}\nEstimación:\n{estimation}"
-#         )
-
-#     return f"{instructions}\n\n" + "\n\n".join(examples)
-
-# ---------------------------------------------------------------------------
-# System prompt construction
-# ---------------------------------------------------------------------------
-
-
-def build_system_prompt(
-    example_format: ExampleFormat = "markdown",
-    num_examples: int = 2,
-    use_examples: bool = True,
-    inline_cleaning: bool = False,
-) -> str:
-    """Assemble the system prompt with role, rates, output spec and (optionally) examples."""
-    role = (
-        "You are a senior software consultant with 15+ years of experience in project "
-        "estimation. Your task is to produce a detailed software project estimation based "
-        "on a meeting transcription provided by the user."
-    )
-    rates = (
-        "Use a developer rate of approximately 62.50 EUR/hour (500 EUR/day) and a designer "
-        "rate of approximately 50 EUR/hour (400 EUR/day). Provide realistic, well-justified "
-        "numbers."
-    )
-
-    examples_block = ""
-    if use_examples and num_examples > 0:
-        rendered = format_examples_for_prompt(select_examples(num_examples), example_format)
-        if rendered:
-            examples_block = (
-                "Below are reference estimations from previous projects. Use them as a guide "
-                "for structure, level of detail, and realistic pricing. Adapt the content to "
-                "match the specific project described in the transcription.\n\n"
-                + rendered
-            )
-
-    cleaning_block = INLINE_CLEANING_BLOCK if inline_cleaning else ""
-
-    sections = [role, cleaning_block, rates, ACTIVE_OUTPUT_PROMPT, examples_block]
-    return "\n\n".join(s for s in sections if s)
-
 
 
 # LLM Wrapper LITE LLM Service
@@ -199,6 +139,7 @@ def _invoke_lite_llm_stream(
         user_message=user_message,
         model_override=model_override,
         max_tokens=max_tokens,
+        thinking_budget=thinking_budget,
     )
 
 # ---------------------------------------------------------------------------
