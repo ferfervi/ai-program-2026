@@ -313,7 +313,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
                     system_prompt=system_prompt,
                     user_message=user_input,
                     model_override=None,
-                    max_tokens=EXTRACTION_MAX_TOKENS,
+                    max_tokens=opts.max_tokens,
                     thinking_budget=opts.thinking_budget,
                 )   
 
@@ -326,7 +326,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
                 result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
                 result["cost_usd"] = round(float(result.get("cost_usd", 0.0)) + prep_cost, 6)
                 # ``cache_hit`` is whatever the wrapper returned for the main estimation call.
-                #result.setdefault("cache_hit", False)
+                result.setdefault("cache_hit", False)
 
 
                 return LLMEstimation(
@@ -336,7 +336,7 @@ def generate_estimation(transcript: str) -> LLMEstimation:
                         input_tokens=getattr(result["usage"], "input", 0),
                         output_tokens=getattr(result["usage"], "output", 0),
                         total_tokens=getattr(result["usage"], "input", 0) + getattr(result["usage"], "output", 0),
-                        cost_usd=getattr(result["cost_usd"], "cost_usd", 0.0),
+                        cost_usd=result["cost_usd"],
                         preprocessing_input_tokens=getattr(result["usage"], "preprocessing_input_tokens", 0),
                         preprocessing_output_tokens=getattr(result["usage"], "preprocessing_output_tokens", 0),
                     ),

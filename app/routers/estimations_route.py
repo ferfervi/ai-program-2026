@@ -29,7 +29,8 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
         usage=llm_estimation.token_usage,
         finish_reason=llm_estimation.finish_reason,
         latency_ms=llm_estimation.latency_ms, 
-        cost_usd=llm_estimation.token_usage.cost_usd
+        cost_usd=llm_estimation.token_usage.cost_usd,
+        cache_hit=llm_estimation.cache_hit
     )
 
 
