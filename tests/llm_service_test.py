@@ -13,7 +13,6 @@ from app.schemas.llm_io import (
 )
 from app.services.llm_service import (
     LLMServiceError,
-    build_system_prompt,
     generate_estimation,
     generate_estimation_stream,
 )
@@ -37,34 +36,6 @@ def _fake_settings(provider: str = "openai", model: str = "gpt-4o-mini"):
 
 def _llm_input(system: str = "You are an estimator.", user: str = "Estimate this project.") -> LLMInputModel:
     return LLMInputModel(system=system, user=user)
-
-
-# ---------------------------------------------------------------------------
-# build_system_prompt
-# ---------------------------------------------------------------------------
-
-class TestBuildSystemPrompt:
-    def test_contains_role_and_rates(self):
-        prompt = build_system_prompt(use_examples=False)
-        assert "senior software consultant" in prompt
-        assert "62.50 EUR/hour" in prompt
-        assert "50 EUR/hour" in prompt
-
-    def test_examples_included_by_default(self):
-        prompt = build_system_prompt(num_examples=1)
-        assert len(prompt) > len(build_system_prompt(use_examples=False))
-
-    def test_examples_excluded_when_disabled(self):
-        prompt_no_ex = build_system_prompt(use_examples=False)
-        assert "reference estimations" not in prompt_no_ex
-
-    def test_inline_cleaning_block_included(self):
-        prompt = build_system_prompt(use_examples=False, inline_cleaning=True)
-        assert "Informal small talk" in prompt
-
-    def test_inline_cleaning_block_excluded_by_default(self):
-        prompt = build_system_prompt(use_examples=False)
-        assert "Informal small talk" not in prompt
 
 
 # ---------------------------------------------------------------------------
