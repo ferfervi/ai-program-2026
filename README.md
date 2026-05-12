@@ -1,6 +1,9 @@
 # estimator-cag
 
+**Author:** Ferran (F.F.V)
+
 Estimator CAG is a FastAPI service for generating software project estimates from meeting transcripts.
+
 
 ## Launch the project
 
