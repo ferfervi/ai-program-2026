@@ -70,6 +70,39 @@ Both UIs connect to `http://localhost:8000` by default. Override with the `API_U
 API_URL=http://custom-api:8000 streamlit run streamlit_app_form.py
 ```
 
+## LLM Provider Selection
+
+Set the `LLM_PROVIDER` environment variable in `.env` to choose which provider the service uses.
+
+### `lite_llm` (recommended)
+
+```env
+LLM_PROVIDER=lite_llm
+PRIMARY_MODEL=openai/gpt-4o-mini
+FALLBACK_MODEL=anthropic/claude-haiku-4-5
+```
+
+Routes requests through [LiteLLM](https://docs.litellm.ai/), which load-balances between models and automatically falls back to `FALLBACK_MODEL` if the primary fails. Anthropic models are fully supported through this path. This is the recommended provider for production use.
+
+### `openai`
+
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+```
+
+Uses the native OpenAI SDK integration (`app/services/open_ai_service.py`). Supports both blocking and streaming responses.
+
+### `anthropic`
+
+```env
+LLM_PROVIDER=anthropic
+```
+
+A native Anthropic SDK integration is planned but **not yet implemented**. Setting this provider will raise an error on streaming requests.
+
+> To use Anthropic models today, use `LLM_PROVIDER=lite_llm` with an Anthropic model as `PRIMARY_MODEL` or `FALLBACK_MODEL`.
+
 ## Health check
 
 ```bash
