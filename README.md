@@ -231,3 +231,35 @@ app/
   data/samples/           # Sample transcript files
 tests/                    # pytest test suite
 ```
+
+## Request flow
+
+```mermaid
+flowchart TD
+    Client(["Client\n(UI / curl / API)"])
+    Router["Router\nestimations_route.py\nPOST /estimate\nPOST /estimate/stream"]
+    Prompts["Jinja2 templates\nrender_estimation_prompt()\nsystem.j2 + user.j2"]
+    LLMService["llm_service.py\ngenerate_estimation()\ngenerate_estimation_stream()"]
+    Decision{"LLM_PROVIDER\nenv var"}
+    LiteLLM["litellm_wrapper_service.py\nload balancing · Redis cache\nfallback PRIMARY→FALLBACK"]
+    OpenAI["open_ai_service.py\nOpenAI SDK\nblocking + streaming"]
+    Anthropic["anthropic_service.py\nAnthropic SDK\n⚠ not yet implemented"]
+    ExternalOpenAI[("OpenAI API")]
+    ExternalAnthropic[("Anthropic API")]
+    Redis[("Redis\ncache")]
+
+    Client -->|"EstimationRequest"| Router
+    Router --> Prompts
+    Prompts -->|"LLMInputModel\n(system, user)"| LLMService
+    LLMService --> Decision
+    Decision -->|"lite_llm"| LiteLLM
+    Decision -->|"openai"| OpenAI
+    Decision -->|"anthropic"| Anthropic
+    LiteLLM <-->|"cache hit / miss"| Redis
+    LiteLLM -->|"primary model"| ExternalOpenAI
+    LiteLLM -->|"fallback model"| ExternalAnthropic
+    OpenAI --> ExternalOpenAI
+    Anthropic -.->|"planned"| ExternalAnthropic
+    LiteLLM -->|"EstimationResponse"| Client
+    OpenAI -->|"EstimationResponse"| Client
+```
