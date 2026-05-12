@@ -54,7 +54,17 @@ Structured form interface with explicit controls for project type, detail level,
 make ui-form
 ```
 
-### Chat UI
+The screenshots below show two consecutive runs against the same input using `LLM_PROVIDER=lite_llm`. The load balancer selected different models on each execution — the Anthropic response is noticeably more verbose.
+
+**OpenAI model selected by LiteLLM (`gpt-4o-mini`, streaming on):**
+
+![Form UI — OpenAI result](docs/screenshots/ui-form-openai.png)
+
+**Anthropic model selected by LiteLLM (`claude-haiku-4-5`, streaming off):**
+
+![Form UI — Anthropic result](docs/screenshots/ui-form-anthropic.png)
+
+### Chat UI (may have stopped working after implementing the form)
 
 Conversational interface — type a description and get an estimate in a chat thread.
 
