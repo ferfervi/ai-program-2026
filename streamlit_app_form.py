@@ -7,8 +7,7 @@ import requests
 import streamlit as st
 
 from app.prompts.loader import render_estimation_prompt
-from app.schemas.request_io import EstimationRequest
-from app.schemas.estimation_io import ProjectType, DetailLevel, OutputFormat
+from app.schemas.estimation import EstimationRequest, ProjectType, DetailLevel, OutputFormat
 
 API_URL = os.getenv("API_URL", "http://localhost:8000/api/v1/estimate")
 STREAM_API_URL = f"{API_URL}/stream"

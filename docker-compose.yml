@@ -42,6 +42,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    # enable ft.search command for testing purposes, not recommended for production
+    # need to load module loadmodule /path/to/redisearch.so
+    
     container_name: estimator-redis
     ports:
       - "6379:6379"

@@ -3,27 +3,28 @@ and structured logging to every LLM call in the estimator.
 
 Design notes
 ------------
-- The wrapper exposes two primitives: ``complete()`` (blocking, full response) and
-  ``complete_stream()`` (yields chunks). Higher-level orchestration (preprocessing,
-  validation, prompt building) stays in ``llm_service.py``.
+- The wrapper exposes two primitives:
+  - ``complete()``: legacy free-text answer (kept for tests that depend on it).
+  - ``complete_structured()``: returns a validated Pydantic model via Instructor,
+    re-prompting on validator errors up to ``max_retries`` times.
 - The Router is configured with two deployments under the same ``model_name``
   ("estimator") so LiteLLM can switch from primary to fallback transparently.
-  When the caller overrides the model per-request (Session 2 live demos), we
-  bypass the Router and call ``litellm.completion`` directly with explicit
-  credentials — that path has no fallback by design.
-- The cache key includes the full system prompt and the generation knobs, so any
-  Session 2 toggle (preprocessing, num_examples, ACTIVE_OUTPUT_PROMPT) implicitly
-  invalidates the cache without manual flushing.
+  When the caller overrides the model per-request we bypass the Router and call
+  ``litellm.completion`` directly — that path has no fallback by design.
 """
 
 from __future__ import annotations
 
 import time
 from typing import Any, Iterator
+from typing import Any, TypeVar
+
 
 import litellm
 import structlog
 from litellm import Router
+from pydantic import BaseModel
+
 
 from app.services.cache_service import EstimationCache
 
@@ -38,6 +39,8 @@ MODEL_COSTS: dict[str, dict[str, float]] = {
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
     "claude-sonnet-4-5": {"input": 3.00, "output": 15.00},
 }
+
+T = TypeVar("T", bound=BaseModel)
 
 
 def _estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
@@ -109,6 +112,80 @@ class LiteLLMMWrapperService:
     # Public API
     # ------------------------------------------------------------------
 
+
+    def complete_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        response_model: type[T],
+        model_override: str | None = None,
+        max_tokens: int = 4000,
+        max_retries: int = 6,
+    ) -> tuple[T, dict[str, Any]]:
+        """Run the LLM with Instructor and return ``(model_instance, meta)``.
+
+        ``meta`` includes ``model``, ``provider`` and ``latency_ms``. Instructor
+        re-prompts the LLM up to ``max_retries`` times when a Pydantic validator
+        raises, feeding the ``ValueError`` message back to the model.
+
+        Streaming bypasses are not relevant here — the entire model is built
+        atomically by Instructor before this function returns.
+        """
+        target_model = model_override or self.primary_model
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+
+        api_key = (
+            self.anthropic_api_key
+            if _provider_from_model(target_model) == "anthropic"
+            else self.openai_api_key
+        )
+
+        log.info(
+            "llm_structured_call_started",
+            model=target_model,
+            response_model=response_model.__name__,
+        )
+        t0 = time.perf_counter()
+        try:
+            result = self._instructor.chat.completions.create(
+                model=target_model,
+                api_key=api_key,
+                timeout=self.timeout,
+                messages=messages,
+                response_model=response_model,
+                max_tokens=max_tokens,
+                max_retries=max_retries,
+            )
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            log.error(
+                "llm_structured_call_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+                latency_ms=latency_ms,
+            )
+            raise
+
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        meta = {
+            "model": _normalise_model_name(target_model),
+            "provider": _provider_from_model(target_model),
+            "latency_ms": latency_ms,
+        }
+        log.info(
+            "llm_structured_call_completed",
+            model=meta["model"],
+            provider=meta["provider"],
+            latency_ms=latency_ms,
+        )
+        return result, meta
+    
+
+    # Complete not structured to preserve the Session 1 interface; the dict response includes all the metadata needed for Session 2. The wrapper
     def complete(
         self,
         *,
@@ -120,6 +197,7 @@ class LiteLLMMWrapperService:
     ) -> dict[str, Any]:
         """Single LLM call with cache + (optional) fallback. Returns the legacy dict shape
         plus ``cache_hit`` and ``cost_usd`` fields.
+        Single LLM call returning a free-text answer.
         """
 
         cache_key_model = model_override or self.primary_model
