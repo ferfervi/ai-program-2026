@@ -18,6 +18,7 @@ from __future__ import annotations
 import time
 from typing import Any, Iterator
 from typing import Any, TypeVar
+import instructor
 
 
 import litellm
@@ -107,6 +108,10 @@ class LiteLLMMWrapperService:
             fallbacks=[{"estimator": ["estimator"]}],
             num_retries=num_retries,
         )
+
+        # Instructor wraps ``litellm.completion`` so we can call any of the
+        # underlying providers with the same ``response_model=`` API.
+        self._instructor = instructor.from_litellm(litellm.completion)
 
     # ------------------------------------------------------------------
     # Public API
