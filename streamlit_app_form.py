@@ -7,8 +7,7 @@ import requests
 import streamlit as st
 
 from app.prompts.loader import render_estimation_prompt
-from app.schemas.request_io import EstimationRequest
-from app.schemas.estimation_io import ProjectType, DetailLevel, OutputFormat
+from app.schemas.estimation import EstimationRequest, ProjectType, DetailLevel, OutputFormat
 
 API_URL = os.getenv("API_URL", "http://localhost:8000/api/v1/estimate")
 STREAM_API_URL = f"{API_URL}/stream"
@@ -186,6 +185,73 @@ def _stream_estimation(payload: Dict) -> None:
 # Blocking (non-streaming) call
 # ---------------------------------------------------------------------------
 
+def _render_estimation_result(result: Dict, output_format: str = "phases_table") -> str:
+    """Render an EstimationResult into markdown, one presentation per output_format.
+
+    The API returns the same typed shape regardless of output_format (Instructor
+    enforces a single schema). The UI is responsible for picking the layout.
+    """
+    summary = result.get("summary", "")
+    confidence = result.get("confidence_pct", 0)
+    phases = result.get("phases", []) or []
+    total_weeks = result.get("total_duration_weeks", 0)
+    total_cost = result.get("total_cost_eur", 0)
+
+    header = [
+        "### Summary",
+        summary,
+        "",
+        f"**Confidence:** {confidence}%",
+        "",
+    ]
+
+    if output_format == "line_items":
+        body = ["### Phases"]
+        for i, p in enumerate(phases, start=1):
+            body.append(
+                f"{i}. **{p.get('name','')}** — {p.get('duration_weeks',0)} week(s), "
+                f"€{p.get('cost_eur',0):,}. {p.get('summary','')}"
+            )
+        footer = [
+            "",
+            f"**Totals:** {total_weeks} weeks · €{total_cost:,}",
+        ]
+        return "\n".join(header + body + footer)
+
+    if output_format == "narrative":
+        paragraphs: List[str] = []
+        for p in phases:
+            paragraphs.append(
+                f"During **{p.get('name','')}** (about {p.get('duration_weeks',0)} week(s), "
+                f"~€{p.get('cost_eur',0):,}), {p.get('summary','')}"
+            )
+        footer = [
+            "",
+            f"Overall, the project runs for **{total_weeks} weeks** at a total of "
+            f"**€{total_cost:,}**.",
+        ]
+        return "\n".join(header + paragraphs + footer)
+
+    # Default: phases_table
+    body = [
+        "### Phases",
+        "| # | Phase | Weeks | Cost (EUR) | Summary |",
+        "|---|---|---:|---:|---|",
+    ]
+    for i, p in enumerate(phases, start=1):
+        phase_summary = (p.get("summary", "") or "").replace("|", "\\|").replace("\n", " ")
+        body.append(
+            f"| {i} | {p.get('name','')} | {p.get('duration_weeks',0)} "
+            f"| {p.get('cost_eur',0):,} | {phase_summary} |"
+        )
+    footer = [
+        "",
+        f"**Total duration:** {total_weeks} weeks  ",
+        f"**Total cost:** €{total_cost:,}",
+    ]
+    return "\n".join(header + body + footer)
+
+
 def _blocking_estimation(payload: Dict) -> None:
     try:
         with st.spinner("Generating estimation…"):
@@ -194,19 +260,26 @@ def _blocking_estimation(payload: Dict) -> None:
             st.error(f"Server error {resp.status_code}: {resp.text}")
             return
         data = resp.json()
-        text = data.get("text", "")
-        st.markdown(text)
+        result = data.get("result") or {}
+        if not result:
+            st.error("Response did not include a `result` object.")
+            st.json(data)
+            return
+        rendered = _render_estimation_result(
+            result, output_format=payload.get("output_format", "phases_table")
+        )
+        st.markdown(rendered)
         st.success("Estimation complete")
         usage = data.get("usage") or {}
-        st.session_state.last_result = text
+        st.session_state.last_result = rendered
         st.session_state.last_call_metrics = {
             "model": data.get("model", ""),
             "provider": data.get("provider", ""),
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
-            "cost_usd": data.get("cost_usd", usage.get("cost_usd", 0.0)),
+            "cost_usd": data.get("cost_usd", 0.0),
             "latency_ms": data.get("latency_ms", 0),
-            "cache_hit": data.get("cache_hit", False),
+            "cache_hit": data.get("cached", False),
         }
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to backend. Is `make serve` running?")

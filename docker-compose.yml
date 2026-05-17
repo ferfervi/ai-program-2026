@@ -41,7 +41,10 @@ services:
       retries: 3
 
   redis:
-    image: redis:7-alpine
+  # redis:7-alpine, which doesn't include the RediSearch module — but app/cache/semantic.py uses FT.SEARCH via redisvl.
+  # The redis/redis-stack-server image includes RediSearch and other Redis modules, and is compatible with the same Redis client libraries.
+  # 7.4.0-v8
+    image: redis/redis-stack-server:latest
     container_name: estimator-redis
     ports:
       - "6379:6379"
