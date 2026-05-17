@@ -32,7 +32,12 @@ from app.cache.semantic import EstimationSemanticCache
 from app.guardrails.input import check_input
 from app.guardrails.output import enforce_scope_response
 from app.prompts.loader import render_estimation_prompt
-from app.schemas.estimation import EstimationResult, EstimationRequest, EstimationResponse
+from app.schemas.estimation import (
+    AttachmentExtraction,
+    EstimationResult,
+    EstimationRequest,
+    EstimationResponse,
+)
 from app.services.attachments_service import extract_text
 from app.services.cache_service import EstimationCache
 from app.services.litellm_wrapper_service import LiteLLMMWrapperService
@@ -139,30 +144,46 @@ class EstimationService:
             )
 
         parts: list[str] = [request.description]
-        attachment_meta: list[dict[str, int | str]] = []
+        extractions: list[AttachmentExtraction] = []
         for filename, content in attachments:
             text = extract_text(filename, content)
             parts.append(
                 ATTACHMENT_SEPARATOR_TEMPLATE.format(filename=filename, text=text)
             )
-            attachment_meta.append(
-                {"filename": filename, "bytes": len(content), "chars": len(text)}
+            extractions.append(
+                AttachmentExtraction(
+                    filename=filename,
+                    bytes=len(content),
+                    chars=len(text),
+                    text=text,
+                )
             )
 
         log.info(
             "estimation_attachments_processed",
             count=len(attachments),
-            attachments=attachment_meta,
+            attachments=[
+                {
+                    "filename": e.filename,
+                    "bytes": e.bytes,
+                    "chars": e.chars,
+                    "preview": (e.text[:160] + "…") if len(e.text) > 160 else e.text,
+                }
+                for e in extractions
+            ],
         )
 
         augmented_request = request.model_copy(
             update={"description": "\n".join(parts)}
         )
-        return self.estimate(
+        response = self.estimate(
             augmented_request,
             project_metadata=project_metadata,
             history=history,
         )
+        # Surface the per-file extraction trace to the caller so the UI can
+        # show "what the LLM actually saw" for each uploaded document.
+        return response.model_copy(update={"attachments": extractions})
 
     def estimate(
         self,

@@ -18,7 +18,7 @@ Key UX choices:
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import requests
 import streamlit as st
@@ -81,6 +81,12 @@ def _ensure_session() -> None:
     st.session_state.completed_turns = 0
     st.session_state.max_turns = 6
     st.session_state.last_call_metrics = {}
+    # Monotonic counter used to derive widget keys for the transcript + file
+    # uploader. Incrementing it after a successful turn forces Streamlit to
+    # instantiate brand-new widgets on the next run, which is the only
+    # reliable way to clear an ``st.file_uploader`` (popping its key from
+    # session_state does not visually reset the displayed files).
+    st.session_state.form_version = 0
 
 
 def _reset_session() -> None:
@@ -408,6 +414,8 @@ def main() -> None:
         f"API base: `{API_BASE_URL}` · session `{st.session_state.session_id}`"
     )
 
+    # Keys derived from ``form_version`` so the next turn renders fresh widgets.
+    form_v = st.session_state.get("form_version", 0)
     with st.form("session_turn_form", clear_on_submit=False):
         transcript = st.text_area(
             "Transcription (new turn)",
@@ -416,6 +424,7 @@ def main() -> None:
                 "will incorporate previous turns + project_metadata."
             ),
             height=160,
+            key=f"turn_transcript_{form_v}",
         )
 
         attachments = st.file_uploader(
@@ -423,6 +432,7 @@ def main() -> None:
             type=["pdf", "docx", "txt", "md"],
             accept_multiple_files=True,
             help="PDF / DOCX / TXT / MD — extracted locally and appended to the transcript.",
+            key=f"turn_attachments_{form_v}",
         )
 
         col_left, col_right = st.columns(2)
@@ -504,6 +514,7 @@ def main() -> None:
                                 "attachments": [
                                     f.name for f in (attachments or [])
                                 ],
+                                "extractions": estimation.get("attachments", []),
                                 "output_format": output_format,
                             }
                         )
@@ -523,6 +534,15 @@ def main() -> None:
                         st.session_state.completed_turns = body.get(
                             "completed_turns", 0
                         )
+                        # Bump the form version so the transcript + uploader
+                        # render as brand-new widgets on the next run (the
+                        # only reliable way to reset st.file_uploader). The
+                        # selectors keep their values — they are not keyed
+                        # off form_version on purpose.
+                        old_v = st.session_state.get("form_version", 0)
+                        st.session_state.pop(f"turn_transcript_{old_v}", None)
+                        st.session_state.pop(f"turn_attachments_{old_v}", None)
+                        st.session_state.form_version = old_v + 1
                         # Re-run so the sidebar reflects the just-updated state
                         # (and so a fresh GET /sessions/{id} populates the
                         # history panel with the new pair).
@@ -549,6 +569,28 @@ def main() -> None:
                     )
                 with st.expander("Transcript", expanded=False):
                     st.write(turn["transcript"])
+                extractions = turn.get("extractions") or []
+                if extractions:
+                    with st.expander(
+                        f"📄 Extracted from attachments ({len(extractions)} file"
+                        f"{'s' if len(extractions) != 1 else ''}) — what the LLM saw",
+                        expanded=False,
+                    ):
+                        for att in extractions:
+                            st.markdown(
+                                f"**{att.get('filename','')}** — "
+                                f"{att.get('chars', 0):,} chars · "
+                                f"{att.get('bytes', 0):,} bytes"
+                            )
+                            text = att.get("text", "")
+                            if text:
+                                st.text(text)
+                            else:
+                                st.caption(
+                                    "Empty extraction (scanned PDF without an "
+                                    "OCR layer, or unsupported content)."
+                                )
+                            st.divider()
                 st.markdown(turn["rendered"])
                 st.markdown("---")
 
