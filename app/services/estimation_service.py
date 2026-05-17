@@ -137,5 +137,5 @@ class EstimationService:
 
         # 8. Return.
         return EstimationResponse(
-            result=result, prompt_version=self.prompt_version, cached=False
+            result=result, prompt_version=self.prompt_version, cached=False,latency_ms=meta.get("latency_ms"), cost_usd=meta.get("cost_usd"),provider=meta.get("provider"), model=meta.get("model")
         )

@@ -66,7 +66,7 @@ async def estimate(request: EstimationRequest,
     #     cost_usd=llm_estimation.token_usage.cost_usd,
     #     cache_hit=llm_estimation.cache_hit
     # )
-    
+
     log.info(
         "estimation_request_received",
         project_type=request.project_type.value,
@@ -96,7 +96,7 @@ async def estimate(request: EstimationRequest,
         raise HTTPException(status_code=502, detail="Upstream LLM call failed") from exc
 
 
-# TODO: review this endpoint and check if it make sense with chat UI, extract logic to a estimation service method if needed
+# TODO: This needs to be reimplemened to support streaming since it got broken from latest changes
 @router.post("/estimate/stream")
 async def estimate_stream(request: EstimationRequest) -> StreamingResponse:
     """Stream model output as it is generated for OpenAI estimations."""

@@ -180,12 +180,14 @@ class LiteLLMMWrapperService:
             "model": _normalise_model_name(target_model),
             "provider": _provider_from_model(target_model),
             "latency_ms": latency_ms,
+            "cost_usd": _estimate_cost(target_model, result.__dict__.get("usage", {}).get("prompt_tokens", 0), result.__dict__.get("usage", {}).get("completion_tokens", 0)),
         }
         log.info(
             "llm_structured_call_completed",
             model=meta["model"],
             provider=meta["provider"],
             latency_ms=latency_ms,
+            cost_usd=meta["cost_usd"],
         )
         return result, meta
     
