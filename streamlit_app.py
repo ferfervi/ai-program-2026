@@ -271,12 +271,67 @@ def _render_history_panel(history: List[Dict]) -> None:
     if not history:
         st.caption("No messages yet.")
         return
-    for entry in history:
+    # Newest first so the user reads top-down without scrolling past stale turns.
+    for entry in reversed(history):
         role = entry.get("role", "?")
         icon = "🧑" if role == "user" else "🤖"
         content = entry.get("content", "")
         snippet = content if len(content) <= 600 else content[:600] + "…"
         st.markdown(f"**{icon} {role.capitalize()}:** {snippet}")
+
+
+# ---------------------------------------------------------------------------
+# Session info dialog
+# ---------------------------------------------------------------------------
+
+
+@st.dialog("Session info", width="large")
+def _session_info_dialog() -> None:
+    """Modal pop-up with the full GET /sessions/{id} payload.
+
+    Fetches the authoritative state on open so what the user sees matches
+    what the backend actually holds (not the last cached copy in
+    ``st.session_state``).
+    """
+    session_id = st.session_state.get("session_id")
+    if not session_id:
+        st.warning("No active session.")
+        return
+
+    try:
+        resp = requests.get(f"{API_BASE_URL}/sessions/{session_id}", timeout=10)
+    except requests.RequestException as exc:
+        st.error(f"Could not reach the backend: {exc}")
+        return
+
+    if resp.status_code != 200:
+        st.error(f"Backend returned {resp.status_code}: {resp.text}")
+        return
+
+    state = resp.json()
+
+    st.markdown(f"**Session id:** `{state.get('session_id', session_id)}`")
+    st.markdown(
+        f"**Turns:** {state.get('completed_turns', 0)} / "
+        f"{state.get('max_turns', 0)} (sliding-window capacity)"
+    )
+
+    st.divider()
+    st.subheader("🧠 Project metadata (memoria)")
+    _render_metadata_panel(state.get("project_metadata") or {})
+
+    st.divider()
+    st.subheader("💬 Conversation history (historial)")
+    history = state.get("history") or []
+    if not history:
+        st.caption("No messages yet.")
+    else:
+        st.caption(f"{len(history)} message(s) — newest first")
+        _render_history_panel(history)
+
+    st.divider()
+    with st.expander("Raw JSON", expanded=False):
+        st.json(state)
 
 
 def _render_sidebar() -> None:
@@ -296,9 +351,18 @@ def _render_sidebar() -> None:
         completed = st.session_state.get("completed_turns", 0)
         max_t = st.session_state.get("max_turns", 6)
         st.write(f"**Turns:** {completed} / {max_t}")
-        if st.button("Refresh from backend", use_container_width=True):
-            _refresh_from_server()
-            st.rerun()
+        col_refresh, col_info = st.columns(2)
+        with col_refresh:
+            if st.button("Refresh", use_container_width=True):
+                _refresh_from_server()
+                st.rerun()
+        with col_info:
+            if st.button(
+                "📋 Info",
+                use_container_width=True,
+                help="Open the full session snapshot (history + project_metadata) in a dialog.",
+            ):
+                _session_info_dialog()
 
         st.divider()
         st.markdown("### 🧠 Project metadata (memoria)")
@@ -465,12 +529,20 @@ def main() -> None:
                         st.rerun()
 
     # Render the conversation so the user sees the full session at a glance.
+    # Newest turn on top: when a long session scrolls, the latest result is
+    # always visible without paging through stale ones.
     if st.session_state.get("turns"):
         st.markdown("---")
         st.subheader("Session turns")
-        for i, turn in enumerate(st.session_state.turns, start=1):
+        total = len(st.session_state.turns)
+        for offset, turn in enumerate(reversed(st.session_state.turns)):
+            turn_number = total - offset
+            is_latest = offset == 0
             with st.container():
-                st.markdown(f"#### Turn {i}")
+                heading = f"#### Turn {turn_number}"
+                if is_latest:
+                    heading += "  · latest"
+                st.markdown(heading)
                 if turn["attachments"]:
                     st.caption(
                         f"📎 Attachments: {', '.join(turn['attachments'])}"
