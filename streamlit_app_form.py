@@ -185,36 +185,71 @@ def _stream_estimation(payload: Dict) -> None:
 # Blocking (non-streaming) call
 # ---------------------------------------------------------------------------
 
-def _render_estimation_result(result: Dict) -> str:
-    """Render a structured EstimationResult into markdown for display + history."""
+def _render_estimation_result(result: Dict, output_format: str = "phases_table") -> str:
+    """Render an EstimationResult into markdown, one presentation per output_format.
+
+    The API returns the same typed shape regardless of output_format (Instructor
+    enforces a single schema). The UI is responsible for picking the layout.
+    """
     summary = result.get("summary", "")
     confidence = result.get("confidence_pct", 0)
     phases = result.get("phases", []) or []
     total_weeks = result.get("total_duration_weeks", 0)
     total_cost = result.get("total_cost_eur", 0)
 
-    lines = [
-        f"### Summary",
+    header = [
+        "### Summary",
         summary,
         "",
         f"**Confidence:** {confidence}%",
         "",
+    ]
+
+    if output_format == "line_items":
+        body = ["### Phases"]
+        for i, p in enumerate(phases, start=1):
+            body.append(
+                f"{i}. **{p.get('name','')}** — {p.get('duration_weeks',0)} week(s), "
+                f"€{p.get('cost_eur',0):,}. {p.get('summary','')}"
+            )
+        footer = [
+            "",
+            f"**Totals:** {total_weeks} weeks · €{total_cost:,}",
+        ]
+        return "\n".join(header + body + footer)
+
+    if output_format == "narrative":
+        paragraphs: List[str] = []
+        for p in phases:
+            paragraphs.append(
+                f"During **{p.get('name','')}** (about {p.get('duration_weeks',0)} week(s), "
+                f"~€{p.get('cost_eur',0):,}), {p.get('summary','')}"
+            )
+        footer = [
+            "",
+            f"Overall, the project runs for **{total_weeks} weeks** at a total of "
+            f"**€{total_cost:,}**.",
+        ]
+        return "\n".join(header + paragraphs + footer)
+
+    # Default: phases_table
+    body = [
         "### Phases",
         "| # | Phase | Weeks | Cost (EUR) | Summary |",
         "|---|---|---:|---:|---|",
     ]
     for i, p in enumerate(phases, start=1):
         phase_summary = (p.get("summary", "") or "").replace("|", "\\|").replace("\n", " ")
-        lines.append(
+        body.append(
             f"| {i} | {p.get('name','')} | {p.get('duration_weeks',0)} "
             f"| {p.get('cost_eur',0):,} | {phase_summary} |"
         )
-    lines += [
+    footer = [
         "",
         f"**Total duration:** {total_weeks} weeks  ",
         f"**Total cost:** €{total_cost:,}",
     ]
-    return "\n".join(lines)
+    return "\n".join(header + body + footer)
 
 
 def _blocking_estimation(payload: Dict) -> None:
@@ -230,7 +265,9 @@ def _blocking_estimation(payload: Dict) -> None:
             st.error("Response did not include a `result` object.")
             st.json(data)
             return
-        rendered = _render_estimation_result(result)
+        rendered = _render_estimation_result(
+            result, output_format=payload.get("output_format", "phases_table")
+        )
         st.markdown(rendered)
         st.success("Estimation complete")
         usage = data.get("usage") or {}
