@@ -184,7 +184,7 @@ class EstimationService:
             project_type=augmented_request.project_type.value,
             detail_level=augmented_request.detail_level.value,
             output_format=augmented_request.output_format.value
-        )   
+        )
 
         # Call the normal estimation pipeline with the augmented description including the attachment content.
         # The caches are keyed off the raw description + metadata, so they do not see the attachment content —
