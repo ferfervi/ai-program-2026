@@ -118,30 +118,24 @@ class LiteLLMMWrapperService:
     # ------------------------------------------------------------------
 
 
-    def complete_structured(
+    def complete_structured_messages(
         self,
         *,
-        system_prompt: str,
-        user_message: str,
+        messages: list[dict[str, Any]],
         response_model: type[T],
         model_override: str | None = None,
         max_tokens: int = 4000,
         max_retries: int = 6,
     ) -> tuple[T, dict[str, Any]]:
-        """Run the LLM with Instructor and return ``(model_instance, meta)``.
+        """Run the LLM with Instructor on a pre-built ``messages`` array.
 
-        ``meta`` includes ``model``, ``provider`` and ``latency_ms``. Instructor
-        re-prompts the LLM up to ``max_retries`` times when a Pydantic validator
-        raises, feeding the ``ValueError`` message back to the model.
-
-        Streaming bypasses are not relevant here — the entire model is built
-        atomically by Instructor before this function returns.
+        This is the multi-turn primitive: callers (e.g. the session-bound
+        estimation flow) pass ``[system, user, assistant, user, ..., user]``
+        and get back a validated Pydantic model. ``complete_structured``
+        below is the single-turn convenience wrapper that builds the array
+        from ``system_prompt`` + ``user_message`` and delegates here.
         """
         target_model = model_override or self.primary_model
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
 
         api_key = (
             self.anthropic_api_key
@@ -153,6 +147,8 @@ class LiteLLMMWrapperService:
             "llm_structured_call_started",
             model=target_model,
             response_model=response_model.__name__,
+            turns=sum(1 for m in messages if m.get("role") == "user"),
+            message_count=len(messages),
         )
         t0 = time.perf_counter()
         try:
@@ -176,11 +172,16 @@ class LiteLLMMWrapperService:
             raise
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        usage = result.__dict__.get("usage", {}) or {}
         meta = {
             "model": _normalise_model_name(target_model),
             "provider": _provider_from_model(target_model),
             "latency_ms": latency_ms,
-            "cost_usd": _estimate_cost(target_model, result.__dict__.get("usage", {}).get("prompt_tokens", 0), result.__dict__.get("usage", {}).get("completion_tokens", 0)),
+            "cost_usd": _estimate_cost(
+                target_model,
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+            ),
         }
         log.info(
             "llm_structured_call_completed",
@@ -190,6 +191,30 @@ class LiteLLMMWrapperService:
             cost_usd=meta["cost_usd"],
         )
         return result, meta
+
+    def complete_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        response_model: type[T],
+        model_override: str | None = None,
+        max_tokens: int = 4000,
+        max_retries: int = 6,
+    ) -> tuple[T, dict[str, Any]]:
+        """Single-turn structured completion. Builds a ``[system, user]``
+        message array and delegates to ``complete_structured_messages``.
+        """
+        return self.complete_structured_messages(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            response_model=response_model,
+            model_override=model_override,
+            max_tokens=max_tokens,
+            max_retries=max_retries,
+        )
     
 
     # Complete not structured to preserve the Session 1 interface; the dict response includes all the metadata needed for Session 2. The wrapper

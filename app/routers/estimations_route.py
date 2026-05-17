@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from instructor.core import InstructorRetryException
 
 from app.dependencies import get_estimation_service
 from app.guardrails.input import InputGuardrailViolation
+from app.routers.sessions_route import (
+    _VALIDATION_FAILURE_HINT,
+    _summarise_validation_failure,
+)
 from app.schemas.estimation import EstimationRequest, EstimationResponse
 from app.services.llm_service import  generate_estimation_stream
 from app.prompts.loader import render_estimation_prompt
@@ -77,7 +82,7 @@ async def estimate(request: EstimationRequest,
 
     try:
         return service.estimate(request)
-    
+
     except InputGuardrailViolation as exc:
         log.info(
             "estimation_blocked_by_input_guardrail",
@@ -86,6 +91,23 @@ async def estimate(request: EstimationRequest,
         )
         raise HTTPException(
             status_code=400, detail={"reason": exc.reason, "message": exc.message}
+        ) from exc
+    except InstructorRetryException as exc:
+        summary = _summarise_validation_failure(exc)
+        log.info(
+            "estimation_validation_exhausted",
+            detail=summary,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "reason": "validation_exhausted",
+                "message": (
+                    f"The model could not produce a self-consistent "
+                    f"estimation: {summary}. {_VALIDATION_FAILURE_HINT}"
+                ),
+                "validation_error": summary,
+            },
         ) from exc
     except Exception as exc:
         log.error(

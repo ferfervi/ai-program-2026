@@ -42,6 +42,12 @@ class Settings(BaseSettings):
 
     # ----------
 
+    # --- Session 5 fields (conversational sliding-window history) ---
+    # A "turn" is one (user, assistant) message pair. With MAX_TURNS=6 the
+    # ConversationHistory keeps the most recent 6 pairs (= 12 messages) plus
+    # a single system message regenerated from ProjectMetadata each call.
+    SESSION_MAX_TURNS: int = 6
+
     ESTIMATOR_API_BASE_URL: str = "http://localhost:8000"
 
     @model_validator(mode="after")

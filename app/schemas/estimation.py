@@ -130,6 +130,14 @@ class EstimationRequest(BaseModel):
     project_type: ProjectType = Field(description="Coarse-grained project category.")
     detail_level: DetailLevel = Field(description="How deep the estimation should go.")
     output_format: OutputFormat = Field(description="Shape of the rendered estimation.")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional conversational session identifier (UUID v4 issued by "
+            "POST /sessions). When provided, the server resumes the matching "
+            "Session so history and project_metadata persist across turns."
+        ),
+    )
 
 
 class EstimationResponse(BaseModel):
