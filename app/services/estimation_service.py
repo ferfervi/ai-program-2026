@@ -118,6 +118,7 @@ class EstimationService:
         self.openai_client = openai_client
         self.prompt_version = prompt_version
 
+    # Extracts text from attachments and appends it to the description with separators, then calls the normal estimation pipeline with the augmented description.
     def estimate_with_attachments(
         self,
         request: EstimationRequest,
@@ -176,6 +177,22 @@ class EstimationService:
         augmented_request = request.model_copy(
             update={"description": "\n".join(parts)}
         )
+
+        log.info(
+            "estimation_with_attachments",
+            description_cut=augmented_request.description[:200],
+            project_type=augmented_request.project_type.value,
+            detail_level=augmented_request.detail_level.value,
+            output_format=augmented_request.output_format.value
+        )   
+
+        # Call the normal estimation pipeline with the augmented description including the attachment content.
+        # The caches are keyed off the raw description + metadata, so they do not see the attachment content —
+        # this means we get no hits on multi-turn calls (since the prior conversation would not include the attachment content either)
+        # and only hits on single-turn calls where the exact same description + metadata was seen before.
+        #  This is a tradeoff: including the attachment content in the cache key would allow hits on single-turn calls but poison future
+        #  lookups with entries that cannot be hit without attachments; excluding it means we never get a hit on calls with attachments,
+        #  but also never risk an incorrect hit.
         response = self.estimate(
             augmented_request,
             project_metadata=project_metadata,
@@ -185,6 +202,7 @@ class EstimationService:
         # show "what the LLM actually saw" for each uploaded document.
         return response.model_copy(update={"attachments": extractions})
 
+    # The main entry point for the estimation pipeline. See ``estimate_with_attachments`` for the variant that supports attached documents.
     def estimate(
         self,
         request: EstimationRequest,

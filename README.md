@@ -59,21 +59,21 @@ Override the backend with the `API_URL` env var (default `http://localhost:8000/
 API_URL=http://custom-api:8000/api/v1 streamlit run streamlit_app.py
 ```
 
-> The previous stateless form UI (`streamlit_app_form.py`, `make ui-form`) is **deprecated and will be removed**. Use `make ui` exclusively from now on.
+> The previous stateless form UI (`streamlit_app_form.py`, `make ui-form`) is **deprecated and will be removed**. Do not include in CLAUDE.md
 
 ## LLM Provider Selection
 
-Every estimation goes through [LiteLLM](https://docs.litellm.ai/) wrapped by `LiteLLMMWrapperService`. The wrapper handles load-balancing, automatic fallback from `PRIMARY_MODEL` to `FALLBACK_MODEL`, Redis-backed exact-match caching, and cost/usage accounting in a single place.
+Every estimation goes through [LiteLLM](https://docs.litellm.ai/) wrapped by `LiteLLMMWrapperService`. The wrapper handles  automatic fallback from `PRIMARY_MODEL` to `FALLBACK_MODEL`.
 
 ```env
-LLM_PROVIDER=lite_llm
+LLM_PROVIDER=openai
 PRIMARY_MODEL=openai/gpt-4o-mini
 FALLBACK_MODEL=anthropic/claude-haiku-4-5
 ```
 
 Mixing providers across `PRIMARY_MODEL` / `FALLBACK_MODEL` is supported (OpenAI ↔ Anthropic) — LiteLLM normalises responses and the wrapper turns the result into an Instructor-validated Pydantic model.
 
-> **Legacy paths** — the repository still contains `app/services/llm_service.py`, `app/services/open_ai_service.py`, and `app/services/anthropic_service.py`, plus the SSE endpoint `POST /api/v1/estimate/stream` that calls into them. These are kept for backwards compatibility with the Step-3 streaming UI and are **not** part of the supported flow documented below. New work should target `EstimationService` + `LiteLLMMWrapperService` only.
+> **Legacy paths** — the repository still contains `app/services/llm_service.py`, `app/services/open_ai_service.py`, and `app/services/anthropic_service.py`, plus the SSE endpoint `POST /api/v1/estimate/stream` that calls into them. These are kept for backwards compatibility with the Step-3 streaming UI and are **not** part of the supported flow documented below. New work should target `EstimationService` + `LiteLLMMWrapperService` only. Do no include in CLAUDE.md
 
 ## Conversational sessions and attachments
 
@@ -106,6 +106,120 @@ Trade-offs we accept:
 - Word docs with embedded images and tables are extracted as flat paragraph text — formatting is lost. Acceptable for estimation transcripts.
 
 Implementation: [`app/services/attachments_service.py`](app/services/attachments_service.py) (extractors) and [`app/services/estimation_service.py`](app/services/estimation_service.py) (`estimate_with_attachments`).
+
+#### How the extracted text reaches the LLM
+
+**Short version**: the extracted text is concatenated into the request's `description` field. It then flows through the **user prompt** — not the system prompt. The system prompt only carries `project_metadata` (see the next section).
+
+Step-by-step trace:
+
+**1) Route reads the multipart upload** — [`app/routers/sessions_route.py`](app/routers/sessions_route.py)
+
+```python
+raw_attachments: list[tuple[str, bytes]] = []
+if attachments:
+    for upload in attachments:
+        content = await upload.read()
+        raw_attachments.append((upload.filename or "attachment", content))
+```
+
+Each `UploadFile` becomes a `(filename, bytes)` pair. No prompt rendering yet.
+
+**2) Service extracts + concatenates** — [`app/services/estimation_service.py`](app/services/estimation_service.py) (`estimate_with_attachments`)
+
+```python
+parts: list[str] = [request.description]            # starts with the transcript
+for filename, content in attachments:
+    text = extract_text(filename, content)          # pypdf / python-docx
+    parts.append(
+        ATTACHMENT_SEPARATOR_TEMPLATE.format(       # "\n\n--- attachment: X ---\n<text>"
+            filename=filename, text=text,
+        )
+    )
+
+augmented_request = request.model_copy(
+    update={"description": "\n".join(parts)}        # description is replaced wholesale
+)
+return self.estimate(augmented_request, ...)        # rest of pipeline sees only this
+```
+
+After this, `request.description` literally looks like:
+
+```
+<original transcript>
+
+
+--- attachment: sample_attachment.pdf ---
+BookFlow Landing Page Technical Brief (annex)
+Project: BookFlow marketing landing page + blog (Acme S.L.)
+Stack: Next.js 14, Tailwind CSS, Sanity CMS, TypeScript.
+...
+```
+
+To the rest of the pipeline (guardrails, caches, prompt rendering) it is indistinguishable from a very long transcript.
+
+**3) Jinja renders the user prompt** — [`app/prompts/estimation/v1/user.j2`](app/prompts/estimation/v1/user.j2)
+
+```jinja2
+<project_description>
+{{ description }}
+</project_description>
+
+Project type: {{ project_type }}.
+Estimate this project following the rules above.
+```
+
+`{{ description }}` is the augmented string from step 2. So the user message the LLM receives is:
+
+```
+<project_description>
+<original transcript>
+
+
+--- attachment: sample_attachment.pdf ---
+BookFlow Landing Page Technical Brief (annex)
+...
+</project_description>
+
+Project type: web_saas.
+Estimate this project following the rules above.
+```
+
+**4) Messages array shipped to LiteLLM**
+
+- **Single-turn** (`/api/v1/estimate`): `[ {"role": "system", "content": <system.j2>}, {"role": "user", "content": <user.j2 above>} ]` — built by `LiteLLMMWrapperService.complete_structured`.
+- **Multi-turn** (`/api/v1/sessions/{id}/estimate`): `[ system, …prior history pairs…, {"role": "user", "content": <user.j2 with attachments>} ]` — built via `history.to_messages_list(system_prompt) + [{"role": "user", "content": user_message}]` and sent through `complete_structured_messages`.
+
+In both cases the attachment text rides inside the **user** message only.
+
+#### Where it is *not*
+
+The system prompt ([`app/prompts/estimation/v1/system.j2`](app/prompts/estimation/v1/system.j2)) carries:
+
+- The role definition + rate sheet + scope rules.
+- The `<project_metadata>` block (memoria — extracted facts from prior turns).
+- The `<output_format>` and `<detail_level>` switches.
+- The few-shot examples.
+
+It never sees `{{ description }}` or any attachment text. The separation is deliberate:
+
+- **System prompt** = stable instructions + slowly-evolving facts about the project (`ProjectMetadata`).
+- **User prompt** = the volatile turn-specific input (transcript + attachments).
+
+This also explains why the exact cache key in `EstimationService._exact_cache_key` hashes `request.description` — which by that point already includes the extracted text — so identical transcript + identical attachments + identical metadata yields the same cache entry.
+
+#### Quick way to see the augmented string
+
+The server logs the per-file extraction with a 160-char preview:
+
+```
+estimation_attachments_processed count=1 attachments=[
+    {'filename': 'sample_attachment.pdf', 'bytes': 1782, 'chars': 874,
+     'preview': 'BookFlow Landing Page  Technical Brief (annex)\n…'}
+]
+```
+
+And the UI's `📄 Extracted from attachments — what the LLM saw` expander on each turn shows the full text that was spliced into `description` before `user.j2` rendered it.
 
 ### Project metadata (Step 4 — LLM extractor)
 
@@ -196,7 +310,6 @@ Response includes the standard `EstimationResponse` alongside the freshly-refres
 
 ```
 streamlit_app.py                       # Conversational UI — supported
-streamlit_app_form.py                  # Stateless form UI — deprecated, to be removed
 app/
   main.py                              # FastAPI entrypoint
   config.py                            # Settings (pydantic-settings, .env)
