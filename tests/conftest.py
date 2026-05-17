@@ -14,3 +14,5 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 def client() -> TestClient:
     """Provide a FastAPI test client configured with the application."""
     return TestClient(app)
+
+
