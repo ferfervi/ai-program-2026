@@ -185,6 +185,38 @@ def _stream_estimation(payload: Dict) -> None:
 # Blocking (non-streaming) call
 # ---------------------------------------------------------------------------
 
+def _render_estimation_result(result: Dict) -> str:
+    """Render a structured EstimationResult into markdown for display + history."""
+    summary = result.get("summary", "")
+    confidence = result.get("confidence_pct", 0)
+    phases = result.get("phases", []) or []
+    total_weeks = result.get("total_duration_weeks", 0)
+    total_cost = result.get("total_cost_eur", 0)
+
+    lines = [
+        f"### Summary",
+        summary,
+        "",
+        f"**Confidence:** {confidence}%",
+        "",
+        "### Phases",
+        "| # | Phase | Weeks | Cost (EUR) | Summary |",
+        "|---|---|---:|---:|---|",
+    ]
+    for i, p in enumerate(phases, start=1):
+        phase_summary = (p.get("summary", "") or "").replace("|", "\\|").replace("\n", " ")
+        lines.append(
+            f"| {i} | {p.get('name','')} | {p.get('duration_weeks',0)} "
+            f"| {p.get('cost_eur',0):,} | {phase_summary} |"
+        )
+    lines += [
+        "",
+        f"**Total duration:** {total_weeks} weeks  ",
+        f"**Total cost:** €{total_cost:,}",
+    ]
+    return "\n".join(lines)
+
+
 def _blocking_estimation(payload: Dict) -> None:
     try:
         with st.spinner("Generating estimation…"):
@@ -193,19 +225,24 @@ def _blocking_estimation(payload: Dict) -> None:
             st.error(f"Server error {resp.status_code}: {resp.text}")
             return
         data = resp.json()
-        text = data.get("text", "")
-        st.markdown(text)
+        result = data.get("result") or {}
+        if not result:
+            st.error("Response did not include a `result` object.")
+            st.json(data)
+            return
+        rendered = _render_estimation_result(result)
+        st.markdown(rendered)
         st.success("Estimation complete")
         usage = data.get("usage") or {}
-        st.session_state.last_result = text
+        st.session_state.last_result = rendered
         st.session_state.last_call_metrics = {
             "model": data.get("model", ""),
             "provider": data.get("provider", ""),
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
-            "cost_usd": data.get("cost_usd", usage.get("cost_usd", 0.0)),
+            "cost_usd": data.get("cost_usd", 0.0),
             "latency_ms": data.get("latency_ms", 0),
-            "cache_hit": data.get("cache_hit", False),
+            "cache_hit": data.get("cached", False),
         }
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to backend. Is `make serve` running?")
