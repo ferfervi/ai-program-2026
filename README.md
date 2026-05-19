@@ -5,6 +5,20 @@
 Estimator CAG is a FastAPI service for generating software project estimates from meeting transcripts.
 
 
+- Missing to move the `estimator` to its own folder and create a separate folder/project for backend interaction. Will do later on
+
+## Screenshots session handling
+
+- Round1:
+ ![ round1](docs/screenshots/round1.png)
+
+- Round2:
+ ![ round2](docs/screenshots/round2.png)
+
+- Round3:
+ ![ round3](docs/screenshots/round3.png)
+
+
 ## Launch the project
 
 ### Local execution (recommended)
@@ -58,8 +72,6 @@ Override the backend with the `API_URL` env var (default `http://localhost:8000/
 ```bash
 API_URL=http://custom-api:8000/api/v1 streamlit run streamlit_app.py
 ```
-
-> The previous stateless form UI (`streamlit_app_form.py`, `make ui-form`) is **deprecated and will be removed**. Do not include in CLAUDE.md
 
 ## LLM Provider Selection
 
