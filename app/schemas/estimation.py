@@ -130,6 +130,28 @@ class EstimationRequest(BaseModel):
     project_type: ProjectType = Field(description="Coarse-grained project category.")
     detail_level: DetailLevel = Field(description="How deep the estimation should go.")
     output_format: OutputFormat = Field(description="Shape of the rendered estimation.")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional conversational session identifier (UUID v4 issued by "
+            "POST /sessions). When provided, the server resumes the matching "
+            "Session so history and project_metadata persist across turns."
+        ),
+    )
+
+
+class AttachmentExtraction(BaseModel):
+    """Per-file extraction trace returned to the caller for inspection.
+
+    The text here is exactly what was concatenated into the description
+    before the prompt was rendered — so the UI can show "what the LLM
+    actually saw" for every uploaded attachment.
+    """
+
+    filename: str
+    bytes: int = Field(ge=0, description="Original file size in bytes.")
+    chars: int = Field(ge=0, description="Length of the extracted text in characters.")
+    text: str = Field(default="", description="Full extracted text, identical to the chunk appended to the prompt.")
 
 
 class EstimationResponse(BaseModel):
@@ -137,9 +159,18 @@ class EstimationResponse(BaseModel):
     prompt_version: str
     cached: bool = False
     # -- Extras about the model resolution and estimation metadata ---
-    model: str = Field(default="", description="Name of the LLM model used for estimation") 
+    model: str = Field(default="", description="Name of the LLM model used for estimation")
     provider: str = Field(default="", description="Provider of the estimation LLM service")
     usage: TokenUsage = Field(default=None, description="Token usage information")
     finish_reason: str = Field(default="", description="Stop reason reported by the provider")
     latency_ms: int = Field(default=0, description="Server-side total latency in milliseconds")
     cost_usd: float = Field(default=0.0, description="Estimated USD cost based on token usage")
+    attachments: list[AttachmentExtraction] = Field(
+        default_factory=list,
+        description=(
+            "Per-file extraction trace, populated only for calls that "
+            "processed attachments. Empty list on plain-transcript "
+            "requests. Lets clients see exactly which text was injected "
+            "into the prompt for each uploaded document."
+        ),
+    )
