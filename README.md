@@ -5,7 +5,82 @@
 Estimator CAG is a FastAPI service for generating software project estimates from meeting transcripts.
 
 
-- Missing to move the `estimator` to its own folder and create a separate folder/project for backend interaction. Will do later on
+
+## session-07/pre-exercise
+
+End-to-end embedding pipeline for historical software budgets: a structural JSON chunker, an OpenAI embedder, a FastAPI ingest endpoint, and a CLI script to compare two strings by cosine similarity.
+
+### Files added
+
+- [`app/embedding_pipeline/`](app/embedding_pipeline/) — `schemas.py`, `chunker.py`, `embedder.py`, `router.py`, `__init__.py`
+- [`scripts/compare.py`](scripts/compare.py) — CLI for cosine similarity between two strings
+- [`app/embedding_pipeline/SANITY_CHECK.md`](app/embedding_pipeline/SANITY_CHECK.md) — sanity-check results for three text pairs
+- [`data/budgets_sample.json`](data/budgets_sample.json) — 15 historical budgets used as the ingest sample
+
+### Ingest endpoint — `POST /embeddings/ingest`
+
+Registered in [`app/main.py`](app/main.py) under the `/embeddings` prefix and visible in [`/docs`](http://localhost:8000/docs). Accepts `IngestRequest` (list of `Budget`), returns `IngestResponse` (`chunks: list[EmbeddedChunk]`, `stats`).
+
+Outside the container (server on `:8000`):
+
+```bash
+curl -X POST http://localhost:8000/embeddings/ingest \
+  -H "Content-Type: application/json" \
+  -d "$(python -c 'import json; print(json.dumps({"budgets": json.load(open("data/budgets_sample.json"))}))')"
+```
+
+Inside the container (compose service is named `estimator`):
+
+```bash
+docker compose exec estimator curl -X POST http://localhost:8000/embeddings/ingest \
+  -H "Content-Type: application/json" \
+  -d @data/budgets_sample.json
+```
+
+For the 15-budget sample the response carries 30 embedded chunks (1536-dim each), ~2,561 input tokens, and `estimated_cost_usd ≈ 5.1e-05` against `text-embedding-3-small`.
+
+### Compare two texts by cosine similarity
+
+[`scripts/compare.py`](scripts/compare.py) reuses `OpenAIEmbedder` to embed two strings with `text-embedding-3-small` and prints the cosine similarity (computed by hand with the standard library, no numpy).
+
+Outside the container (uses the `.env` in the working directory):
+
+```bash
+uv run python scripts/compare.py \
+  --text-a "OAuth 2.0 authentication backend for fintech" \
+  --text-b "JWT-based authorization service for banking app"
+```
+
+Inside the container (the compose service is named `estimator`):
+
+```bash
+docker compose exec estimator python scripts/compare.py \
+  --text-a "OAuth 2.0 authentication backend for fintech" \
+  --text-b "JWT-based authorization service for banking app"
+```
+
+Expected output:
+
+```
+Text A: OAuth 2.0 authentication backend for fintech
+Text B: JWT-based authorization service for banking app
+Cosine similarity: 0.6329
+```
+
+### Sanity check
+
+See [`app/embedding_pipeline/SANITY_CHECK.md`](app/embedding_pipeline/SANITY_CHECK.md) for the three reference pairs (near-synonym, unrelated, generic) and the brief commentary on the results.
+
+### New dependency
+
+Only one new entry in [`pyproject.toml`](pyproject.toml): `tiktoken>=0.12.0` (used by the chunker to count tokens per chunk before sending them to the embeddings API).
+
+---
+
+**TODO:**
+
+- Missing to move the `estimator` to its own folder and create a separate folder/project for backend interaction. Will do later on.
+- Besides, some models like evals from session6 need to be done (missing update from that session)
 
 ## Screenshots session handling
 

@@ -10,6 +10,7 @@ from app.config import get_settings
 
 from app.routers.estimations_route import router as router
 from app.routers.sessions_route import router as sessions_router
+from app.embedding_pipeline.router import router as embeddings_router
 
 def _prefix_module(logger, method, event_dict):
     module = event_dict.pop("module", None)
@@ -75,6 +76,7 @@ app.add_middleware(
 )
 app.include_router(prefix="/api/v1", router=router)
 app.include_router(prefix="/api/v1", router=sessions_router)
+app.include_router(prefix="/embeddings", router=embeddings_router)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 if _STATIC_DIR.is_dir():

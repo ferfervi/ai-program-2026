@@ -17,6 +17,7 @@ dependencies = [
     "redisvl>=0.18.2",
     "streamlit>=1.57.0",
     "structlog>=25.5.0",
+    "tiktoken>=0.12.0",
     "uvicorn[standard]>=0.46.0",
 ]
 

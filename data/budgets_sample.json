@@ -1,0 +1,630 @@
+[
+  {
+    "budget_id": "BUD-2024-001",
+    "client_metadata": {
+      "name": "NovaBank Solutions",
+      "sector": "fintech",
+      "country": "ES"
+    },
+    "project_summary": "Core Banking REST API migration with microservices architecture",
+    "main_technology": "java_spring_boot",
+    "year": 2024,
+    "total_estimated_hours": 640,
+    "components": [
+      {
+        "component_id": "CORE-001",
+        "name": "Ledger & Transaction Engine",
+        "description": "Double-entry accounting ledger microservice with ACID compliance, transaction processing pipeline, and audit logging.",
+        "tech_stack": [
+          "java_spring_boot",
+          "postgresql",
+          "kafka"
+        ],
+        "estimated_hours": 320,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "CORE-002",
+        "name": "PSD2 Open Banking Integration API",
+        "description": "Exposing standard accounts and payments endpoints complying with Berlin Group PSD2 specifications.",
+        "tech_stack": [
+          "java_spring_boot",
+          "redis",
+          "apigee"
+        ],
+        "estimated_hours": 320,
+        "complexity": "high",
+        "dependencies": [
+          "CORE-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-002",
+    "client_metadata": {
+      "name": "ShopFast Global",
+      "sector": "e-commerce",
+      "country": "FR"
+    },
+    "project_summary": "High-scalability headless e-commerce storefront and checkout system",
+    "main_technology": "next_js",
+    "year": 2024,
+    "total_estimated_hours": 420,
+    "components": [
+      {
+        "component_id": "STORE-001",
+        "name": "Headless Frontend Storefront",
+        "description": "Server-side rendered dynamic catalog, product detailed views, search filtering, and state-managed cart layout.",
+        "tech_stack": [
+          "next_js",
+          "react",
+          "tailwindcss"
+        ],
+        "estimated_hours": 240,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "STORE-002",
+        "name": "Stripe Multi-currency Checkout Pipeline",
+        "description": "Integration of Stripe Elements, serverless webhooks for payment state settlement, and automated PDF invoice generation.",
+        "tech_stack": [
+          "node_js",
+          "express",
+          "stripe_api"
+        ],
+        "estimated_hours": 180,
+        "complexity": "medium",
+        "dependencies": [
+          "STORE-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-003",
+    "client_metadata": {
+      "name": "SanitasDigital Clinic",
+      "sector": "healthcare",
+      "country": "ES"
+    },
+    "project_summary": "HL7/FHIR compliant electronic health records (EHR) synchronization platform",
+    "main_technology": "python_fastapi",
+    "year": 2024,
+    "total_estimated_hours": 510,
+    "components": [
+      {
+        "component_id": "HL7-001",
+        "name": "FHIR Data Ingestion Pipeline",
+        "description": "Asynchronous REST endpoints to ingest, validate, and parse FHIR JSON resources into relational clinic structures.",
+        "tech_stack": [
+          "python_fastapi",
+          "pydantic",
+          "postgresql"
+        ],
+        "estimated_hours": 290,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "HL7-002",
+        "name": "Doctor-Patient Telemedicine Gateway",
+        "description": "WebRTC signaling server for secure multi-party consultations with end-to-end media encryption checks.",
+        "tech_stack": [
+          "python_fastapi",
+          "webrtc",
+          "redis_pubsub"
+        ],
+        "estimated_hours": 220,
+        "complexity": "high",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-004",
+    "client_metadata": {
+      "name": "IndusAutomate SA",
+      "sector": "industrial",
+      "country": "DE"
+    },
+    "project_summary": "IoT Telemetry Dashboard and Predictive Maintenance Broker",
+    "main_technology": "go",
+    "year": 2024,
+    "total_estimated_hours": 580,
+    "components": [
+      {
+        "component_id": "IOT-001",
+        "name": "MQTT Data Broker and Ingestion Worker",
+        "description": "High-throughput Go daemon listening to industrial MQTT brokers, parsing binary payloads, and writing to a time-series database.",
+        "tech_stack": [
+          "go",
+          "mqtt",
+          "timescaledb"
+        ],
+        "estimated_hours": 300,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "IOT-002",
+        "name": "Factory Analytics Real-time Dashboard",
+        "description": "WebSockets-driven interface displaying live machine temperatures, anomalies, and threshold alert rules.",
+        "tech_stack": [
+          "vue_js",
+          "pinia",
+          "d3_js"
+        ],
+        "estimated_hours": 280,
+        "complexity": "medium",
+        "dependencies": [
+          "IOT-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-005",
+    "client_metadata": {
+      "name": "CryptoFlow Inc",
+      "sector": "fintech",
+      "country": "UK"
+    },
+    "project_summary": "Automated Crypto Arbitrage and Reconciliation Backoffice",
+    "main_technology": "python_django",
+    "year": 2024,
+    "total_estimated_hours": 360,
+    "components": [
+      {
+        "component_id": "CRYP-001",
+        "name": "Exchange Market Data Aggregator",
+        "description": "Celery periodic tasks pulling order books from multi-exchange APIs with local Redis caching layers.",
+        "tech_stack": [
+          "python_django",
+          "celery",
+          "redis"
+        ],
+        "estimated_hours": 160,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "CRYP-002",
+        "name": "Audit & Financial Reconciliation System",
+        "description": "Ledger verification algorithms matching local trades with blockchain transaction hashes via RPC nodes.",
+        "tech_stack": [
+          "python_django",
+          "postgresql",
+          "web3_py"
+        ],
+        "estimated_hours": 200,
+        "complexity": "high",
+        "dependencies": [
+          "CRYP-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-006",
+    "client_metadata": {
+      "name": "MarketVibe Marketplace",
+      "sector": "e-commerce",
+      "country": "ES"
+    },
+    "project_summary": "AI-Powered Product Recommendation Engine and Vector Search",
+    "main_technology": "python_fastapi",
+    "year": 2024,
+    "total_estimated_hours": 440,
+    "components": [
+      {
+        "component_id": "AI-001",
+        "name": "Vector Embedding & Catalog Indexer",
+        "description": "Pipeline computing text/image embeddings using Sentence-Transformers and indexing them in a vector database.",
+        "tech_stack": [
+          "python_fastapi",
+          "qdrant",
+          "pytorch"
+        ],
+        "estimated_hours": 240,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "AI-002",
+        "name": "Personalized Recommendations API",
+        "description": "Endpoint matching user session history with catalog similarities to output real-time item suggestions.",
+        "tech_stack": [
+          "python_fastapi",
+          "redis",
+          "scikit_learn"
+        ],
+        "estimated_hours": 200,
+        "complexity": "medium",
+        "dependencies": [
+          "AI-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-007",
+    "client_metadata": {
+      "name": "MediKeep Systems",
+      "sector": "healthcare",
+      "country": "PT"
+    },
+    "project_summary": "Pharmacy Inventory Tracking and Controlled Substance Reporting",
+    "main_technology": "c_sharp_dotnet",
+    "year": 2024,
+    "total_estimated_hours": 390,
+    "components": [
+      {
+        "component_id": "MED-001",
+        "name": "Stock Management and Expiry Tracking Core",
+        "description": "Relational schema enforcement for drug batch tracking, cold-chain temperature thresholds, and predictive supply reordering.",
+        "tech_stack": [
+          "c_sharp_dotnet",
+          "entity_framework",
+          "sql_server"
+        ],
+        "estimated_hours": 210,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "MED-002",
+        "name": "National Health Regulatory Reporting Service",
+        "description": "Secure SOAP/XML automated transmission portal for prescription validation with national health registries.",
+        "tech_stack": [
+          "c_sharp_dotnet",
+          "wcf",
+          "cryptography_api"
+        ],
+        "estimated_hours": 180,
+        "complexity": "high",
+        "dependencies": [
+          "MED-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-008",
+    "client_metadata": {
+      "name": "SteelWorks Analytics",
+      "sector": "industrial",
+      "country": "PL"
+    },
+    "project_summary": "Computer Vision Pipeline for Steel Defect Detection",
+    "main_technology": "python_fastapi",
+    "year": 2024,
+    "total_estimated_hours": 600,
+    "components": [
+      {
+        "component_id": "CV-001",
+        "name": "Industrial Camera Frame Capture Worker",
+        "description": "High-speed RTSP stream reader extracting frames from factory cameras, downsampling, and enqueueing into a local broker.",
+        "tech_stack": [
+          "python_fastapi",
+          "opencv",
+          "rabbitmq"
+        ],
+        "estimated_hours": 200,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "CV-002",
+        "name": "YOLO Defect Segmentation & Classification Inference",
+        "description": "TensorRT optimized inference pipeline applying custom trained YOLO models to locate cracks and anomalies in real-time.",
+        "tech_stack": [
+          "python_fastapi",
+          "tensorrt",
+          "onnxruntime"
+        ],
+        "estimated_hours": 400,
+        "complexity": "high",
+        "dependencies": [
+          "CV-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-009",
+    "client_metadata": {
+      "name": "PayShield Labs",
+      "sector": "fintech",
+      "country": "IE"
+    },
+    "project_summary": "Fraud Detection Engine and Risk Scoring Web Service",
+    "main_technology": "go",
+    "year": 2024,
+    "total_estimated_hours": 500,
+    "components": [
+      {
+        "component_id": "FRD-001",
+        "name": "Real-time Transaction Rules Checker",
+        "description": "High-performance evaluation engine executing customizable boolean and numerical risk rule matrices within milliseconds.",
+        "tech_stack": [
+          "go",
+          "redis",
+          "mongodb"
+        ],
+        "estimated_hours": 260,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "FRD-002",
+        "name": "Risk Profiles & Machine Learning Scoring",
+        "description": "Microservice making feature fetches and calling external internal models to output continuous probability fraud scores.",
+        "tech_stack": [
+          "go",
+          "grpc",
+          "protobuf"
+        ],
+        "estimated_hours": 240,
+        "complexity": "high",
+        "dependencies": [
+          "FRD-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-010",
+    "client_metadata": {
+      "name": "GrocerCart Inc",
+      "sector": "e-commerce",
+      "country": "IT"
+    },
+    "project_summary": "Hyperlocal Delivery Logistics Routing and Order Management",
+    "main_technology": "node_js",
+    "year": 2024,
+    "total_estimated_hours": 460,
+    "components": [
+      {
+        "component_id": "LOG-001",
+        "name": "Dynamic Vehicle Routing & Dispatcher Engine",
+        "description": "Geospatial indexing and vehicle routing optimization algorithm calculation utilizing OpenStreetMap data.",
+        "tech_stack": [
+          "node_js",
+          "typescript",
+          "postgis"
+        ],
+        "estimated_hours": 260,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "LOG-002",
+        "name": "Courier Mobile App Synchronizer Backend",
+        "description": "Real-time location reporting and status transitions synced via robust state machines and persistent pub-sub connections.",
+        "tech_stack": [
+          "node_js",
+          "socket_io",
+          "redis"
+        ],
+        "estimated_hours": 200,
+        "complexity": "medium",
+        "dependencies": [
+          "LOG-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-011",
+    "client_metadata": {
+      "name": "Genomix Research",
+      "sector": "healthcare",
+      "country": "UK"
+    },
+    "project_summary": "Distributed Genomic Sequence Processing Pipeline Backend",
+    "main_technology": "python_django",
+    "year": 2024,
+    "total_estimated_hours": 720,
+    "components": [
+      {
+        "component_id": "GEN-001",
+        "name": "DNA FASTQ File Splitter & MapReduce Worker",
+        "description": "Heavy distributed computing tasks orchestrating data alignment files across elastic cloud compute instances.",
+        "tech_stack": [
+          "python_django",
+          "celery",
+          "aws_s3"
+        ],
+        "estimated_hours": 380,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "GEN-002",
+        "name": "Variant Call Metadata Annotation API",
+        "description": "GraphQL schema mapping and serving queried genetic mutations cross-referenced against global public biomedical databases.",
+        "tech_stack": [
+          "python_django",
+          "graphene_django",
+          "elasticsearch"
+        ],
+        "estimated_hours": 340,
+        "complexity": "high",
+        "dependencies": [
+          "GEN-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-012",
+    "client_metadata": {
+      "name": "AeroParts Global",
+      "sector": "industrial",
+      "country": "FR"
+    },
+    "project_summary": "Supply Chain Digital Twin and Warehouse Inventory Manager",
+    "main_technology": "java_spring_boot",
+    "year": 2024,
+    "total_estimated_hours": 530,
+    "components": [
+      {
+        "component_id": "TWIN-001",
+        "name": "Warehouse Asset Graph Modeler",
+        "description": "Hierarchical graph representation mapping physically tracking positions, storage bin limits, and forklift operations.",
+        "tech_stack": [
+          "java_spring_boot",
+          "neo4j",
+          "hibernate"
+        ],
+        "estimated_hours": 280,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "TWIN-002",
+        "name": "ERP SAP IDoc Synchronization Adapter",
+        "description": "Enterprise-grade background messaging worker converting SAP IDoc structures to standard internal payloads.",
+        "tech_stack": [
+          "java_spring_boot",
+          "apache_camel",
+          "activemq"
+        ],
+        "estimated_hours": 250,
+        "complexity": "medium",
+        "dependencies": [
+          "TWIN-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-013",
+    "client_metadata": {
+      "name": "Insurify Seguros",
+      "sector": "fintech",
+      "country": "ES"
+    },
+    "project_summary": "Car Insurance Quote Telematics and Policy Generator",
+    "main_technology": "ruby_on_rails",
+    "year": 2024,
+    "total_estimated_hours": 340,
+    "components": [
+      {
+        "component_id": "INS-001",
+        "name": "Driver Behavior Risk Assessment Processor",
+        "description": "Ingestion of mobile sensor CSV payloads computing speed variance, sharp brakes, and nocturnal driving risk scores.",
+        "tech_stack": [
+          "ruby_on_rails",
+          "sidekiq",
+          "postgresql"
+        ],
+        "estimated_hours": 180,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "INS-002",
+        "name": "Automated Policy Underwriting and Document Signer",
+        "description": "Dynamic insurance legal contract builder rendering PDFs and wrapping DocuSign REST API embedded workflows.",
+        "tech_stack": [
+          "ruby_on_rails",
+          "aws_s3",
+          "docusign_api"
+        ],
+        "estimated_hours": 160,
+        "complexity": "medium",
+        "dependencies": [
+          "INS-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-014",
+    "client_metadata": {
+      "name": "FashionHub Ltd",
+      "sector": "e-commerce",
+      "country": "NL"
+    },
+    "project_summary": "Multi-tenant B2B Wholesale Inventory and Pre-ordering Portal",
+    "main_technology": "php_laravel",
+    "year": 2024,
+    "total_estimated_hours": 410,
+    "components": [
+      {
+        "component_id": "TEN-001",
+        "name": "Multi-tenant Subdomain Separation Engine",
+        "description": "Dynamic database connection pooling and scope isolation based on corporate client subdomains.",
+        "tech_stack": [
+          "php_laravel",
+          "mysql",
+          "redis"
+        ],
+        "estimated_hours": 170,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "TEN-002",
+        "name": "Bulk Pre-order & Matrix Allocator Tool",
+        "description": "Custom grid layout component backend processing high-volume item matrices (sizes × colors) with strict ledger validation.",
+        "tech_stack": [
+          "php_laravel",
+          "vue_js",
+          "mysql"
+        ],
+        "estimated_hours": 240,
+        "complexity": "medium",
+        "dependencies": [
+          "TEN-001"
+        ]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-015",
+    "client_metadata": {
+      "name": "NeuroScan Tech",
+      "sector": "healthcare",
+      "country": "US"
+    },
+    "project_summary": "DICOM Medical Image Cloud Storage and Viewer Platform",
+    "main_technology": "node_js",
+    "year": 2024,
+    "total_estimated_hours": 620,
+    "components": [
+      {
+        "component_id": "DIC-001",
+        "name": "DICOM Metadata Extractor and PACS Connector",
+        "description": "Node worker using native bindings to open DCM files, extract clinical metadata tags, and securely archive heavy objects.",
+        "tech_stack": [
+          "node_js",
+          "dicom_parser",
+          "aws_s3"
+        ],
+        "estimated_hours": 300,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "DIC-002",
+        "name": "HIPAA Compliant Audit Log & Viewer Backend",
+        "description": "Immutably recording every user pixel-access action to an encrypted database log compliant with healthcare privacy regulations.",
+        "tech_stack": [
+          "node_js",
+          "express",
+          "dynamodb"
+        ],
+        "estimated_hours": 320,
+        "complexity": "high",
+        "dependencies": [
+          "DIC-001"
+        ]
+      }
+    ]
+  }
+]

@@ -420,6 +420,7 @@ dependencies = [
     { name = "redisvl" },
     { name = "streamlit" },
     { name = "structlog" },
+    { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -444,6 +445,7 @@ requires-dist = [
     { name = "redisvl", specifier = ">=0.18.2" },
     { name = "streamlit", specifier = ">=1.57.0" },
     { name = "structlog", specifier = ">=25.5.0" },
+    { name = "tiktoken", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.46.0" },
 ]
 
