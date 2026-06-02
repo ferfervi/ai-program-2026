@@ -22,9 +22,14 @@ services:
         condition: service_healthy
 
     # Bind-mount the app/ directory so code changes are reflected immediately
-    # inside the container without rebuilding the image.
+    # inside the container without rebuilding the image. scripts/ and data/
+    # are mounted too so dev-time tools (scripts/compare.py) and the sample
+    # payload (data/budgets_sample.json) are reachable from inside the
+    # container via `docker compose exec`.
     volumes:
       - ./app:/app/app
+      - ./scripts:/app/scripts
+      - ./data:/app/data
 
     # Override the default CMD to enable auto-reload on file changes.
     # Remove --reload for production deployments.

@@ -1,4 +1,4 @@
-# estimator-cag
+# estimator
 
 **Author:** Ferran (F.F.V)
 
@@ -29,7 +29,7 @@ curl -X POST http://localhost:8000/embeddings/ingest \
   -d "$(python -c 'import json; print(json.dumps({"budgets": json.load(open("data/budgets_sample.json"))}))')"
 ```
 
-Inside the container (compose service is named `estimator`):
+Inside the container (compose service is named `estimator`; bring the stack up first with `make start-docker` if it isn't running):
 
 ```bash
 docker compose exec estimator curl -X POST http://localhost:8000/embeddings/ingest \
@@ -51,7 +51,7 @@ uv run python scripts/compare.py \
   --text-b "JWT-based authorization service for banking app"
 ```
 
-Inside the container (the compose service is named `estimator`):
+Inside the container (the compose service is named `estimator`; bring the stack up first with `make start-docker` if it isn't running):
 
 ```bash
 docker compose exec estimator python scripts/compare.py \
