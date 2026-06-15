@@ -9,12 +9,17 @@
 Due to the divergence after the refactor and as well different implementation choices, it was difficult to follow the proposed new structure.
 Decided to move my previous structure into a "previous" folder and use the new one from the repo directly.
 
-#### Migrations:
+> **Note — API route prefixes are inconsistent after the refactor.** `estimations`, `config` and `ingestion`
+> sit under `/api/v1`, while `sessions`, `embeddings` and `search` are mounted at the bare root. The Streamlit
+> UI was still calling `/api/v1/sessions` and got a 404; fixed by pointing `streamlit_app.py` at
+> `http://localhost:8000` (so it hits `/sessions`). To be normalized into a single prefix in a later step.
+
+#### Migrations (alembic):
 
 ```
 # init
 docker compose run --rm --user "$(id -u):$(id -g)" estimator .venv/bin/python -m alembic init -t async alembic
-# run migration 1
+# run migrations
 docker compose run --rm --user "$(id -u):$(id -g)" estimator .venv/bin/python -m alembic upgrade head
 ```
 
