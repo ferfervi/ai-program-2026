@@ -17,7 +17,9 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
+        working-directory: estimator
         run: uv sync --frozen
 
       - name: Run tests
+        working-directory: estimator
         run: uv run pytest -v
