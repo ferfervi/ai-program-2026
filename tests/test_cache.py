@@ -1,7 +1,7 @@
 import fakeredis
 import pytest
 
-from app.services.cache_service import EstimationCache
+from app.generation.cag.exact import EstimationCache
 
 
 @pytest.fixture

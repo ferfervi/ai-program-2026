@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.dependencies import get_estimation_service
 from app.main import app
-from app.schemas.estimation import EstimationRequest, EstimationResponse, EstimationResult
+from app.domain.schemas.estimation import EstimationRequest, EstimationResponse, EstimationResult
 
 
 def _canned_result() -> EstimationResult:

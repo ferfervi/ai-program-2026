@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.estimation import (
+from app.domain.schemas.estimation import (
     DetailLevel,
     EstimationRequest,
     EstimationResult,

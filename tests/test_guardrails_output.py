@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.guardrails.output import enforce_scope_response
-from app.schemas.estimation import EstimationResult, OUT_OF_SCOPE_PREFIX
+from app.foundation.guardrails.output import enforce_scope_response
+from app.domain.schemas.estimation import EstimationResult, OUT_OF_SCOPE_PREFIX
 
 
 def _build(*, confidence_pct: int, summary: str) -> EstimationResult:

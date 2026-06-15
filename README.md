@@ -2,19 +2,32 @@
 
 **Author:** Ferran (F.F.V)
 
-Estimator CAG is a FastAPI service for generating software project estimates from meeting transcripts.
+# RAG system for estimates
 
 ## session-08
 
-Migraions:
-´´´
+Due to the divergence after the refactor and as well different implementation choices, it was difficult to follow the proposed new structure.
+Decided to move my previous structure into a "previous" folder and use the new one from the repo directly.
+
+#### Migrations:
+
+```
 # init
 docker compose run --rm --user "$(id -u):$(id -g)" estimator .venv/bin/python -m alembic init -t async alembic
 # run migration 1
 docker compose run --rm --user "$(id -u):$(id -g)" estimator .venv/bin/python -m alembic upgrade head
+```
 
 
-´´
+#### Running Search:
+
+`curl -X POST http://localhost:8000/search      -H "Content-Type: application/json"      -d @data/my_search_example.json`
+
+#### Running search examples script
+
+`docker compose run --rm estimator python scripts/query_examples.py`
+
+
 
 ## session-07/pre-exercise
 

@@ -1,0 +1,66 @@
+from functools import lru_cache
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    # Información de la App
+    PROJECT_NAME: str = "Mi Proyecto FastAPI"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
+    
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    LLM_PROVIDER: str = ""
+    LLM_MODEL: str = ""
+    APP_ENV: str = ""
+    LOG_LEVEL: str = ""
+
+    # Configuración de Pydantic para leer el archivo .env
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        env_file_encoding="utf-8",
+        case_sensitive=True
+    )
+
+    # --- Session 3 fields (LiteLLM wrapper, Redis cache, Streamlit transport) ---
+    PRIMARY_MODEL: str = "gpt-4o-mini"
+    FALLBACK_MODEL: str = "claude-haiku-4-5-20251001"
+    LLM_TIMEOUT: int = 30
+    LLM_RETRIES: int = 2
+
+    REDIS_URL: str = "redis://localhost:6379"
+    CACHE_TTL: int = 86400
+
+    # --- Session 4 fields (semantic cache) ---
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    SEMANTIC_CACHE_THRESHOLD: float = 0.85
+    SEMANTIC_CACHE_TTL: int = 86400
+    # When True, the semantic cache LOGS potential hits but does NOT serve them.
+    # Used to gather metrics before flipping the cache on in production.
+    SEMANTIC_CACHE_LOG_ONLY: bool = False
+
+    # ----------
+
+    # --- Session 5 fields (conversational sliding-window history) ---
+    # A "turn" is one (user, assistant) message pair. With MAX_TURNS=6 the
+    # ConversationHistory keeps the most recent 6 pairs (= 12 messages) plus
+    # a single system message regenerated from ProjectMetadata each call.
+    SESSION_MAX_TURNS: int = 6
+
+    ESTIMATOR_API_BASE_URL: str = "http://localhost:8000"
+
+    @model_validator(mode="after")
+    def validate_at_least_one_api_key(self) -> "Settings":
+        """LiteLLM may try either provider via fallback, so we require at least one key."""
+        if not self.OPENAI_API_KEY and not self.ANTHROPIC_API_KEY:
+            raise ValueError(
+                "At least one of OPENAI_API_KEY or ANTHROPIC_API_KEY must be set"
+            )
+        return self
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return cached application settings (singleton)."""
+    return Settings()

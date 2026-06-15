@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.guardrails.input import InputGuardrailViolation, check_input
+from app.foundation.guardrails.input import InputGuardrailViolation, check_input
 
 
 CLEAN_DESCRIPTION = (

@@ -1,22 +1,14 @@
 import structlog
 from contextlib import asynccontextmanager
-from fastapi.middleware.cors import CORSMiddleware
-
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import get_settings
-
-from app.routers.estimations_route import router as router
-from app.routers.sessions_route import router as sessions_router
-from app.embedding_pipeline.router import router as embeddings_router
-
-def _prefix_module(logger, method, event_dict):
-    module = event_dict.pop("module", None)
-    if module:
-        event_dict["event"] = f"[{module}] {event_dict.get('event', '')}"
-    return event_dict
+from app.api.embeddings import router as embeddings_router
+from app.api.search import router as search_router
+from app.api import config as config_api
+from app.api import estimations, ingestion, sessions
 
 
 def configure_logging() -> None:
@@ -30,10 +22,6 @@ def configure_logging() -> None:
 
     structlog.configure(
         processors=[
-            structlog.processors.CallsiteParameterAdder(
-                [structlog.processors.CallsiteParameter.MODULE],
-            ),
-            _prefix_module,
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
@@ -47,26 +35,42 @@ def configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
     configure_logging()
     log = structlog.get_logger()
     settings = get_settings()
+    # Session 6: fail fast on a malformed catalog rather than at the first
+    # ingestion request. Catalogs are versioned in git; a broken one is a
+    # deploy-time problem, not a request-time one.
+    try:
+        from app.dependencies import get_catalog
+
+        catalog = get_catalog()
+        log.info(
+            "catalog_loaded",
+            version=catalog.version,
+            sources_total=len(catalog.sources),
+            sources_included=len(catalog.included_sources()),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error("catalog_load_failed", error=str(exc)[:400])
     log.info("application_started", environment=settings.APP_ENV)
     yield
     log.info("application_shutdown")
 
 
-
 app = FastAPI(
-    title="Software Estimation CAG Service",
-    description="AI-powered software estimation service using Cache Augmented Generation architecture",
+    title="Software Estimation Service",
+    description="AI-powered software estimation service with typed input and versioned prompts",
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -74,22 +78,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(prefix="/api/v1", router=router)
-app.include_router(prefix="/api/v1", router=sessions_router)
-app.include_router(prefix="/embeddings", router=embeddings_router)
 
-_STATIC_DIR = Path(__file__).resolve().parent / "static"
-if _STATIC_DIR.is_dir():
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+app.include_router(estimations.router)
+app.include_router(sessions.router)
+app.include_router(ingestion.router)
+app.include_router(embeddings_router)
+app.include_router(search_router)
+app.include_router(config_api.router)
+
 
 @app.get("/health")
-def health():
-    #logging for debugging
-    print("Health check endpoint was called.")
-    return {"status": "healthy"}
-
-@app.get("/")
-def main():
-    # logging for debugging
-    print("Root endpoint was called.")
-    return {"message": "Please check the API documentation at endpoint /docs."}
+async def health_check() -> dict:
+    """Return service health status."""
+    settings = get_settings()
+    return {
+        "status": "healthy",
+        "version": "0.1.0",
+        "environment": settings.APP_ENV,
+    }
