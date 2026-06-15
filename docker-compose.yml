@@ -2,6 +2,21 @@
 # For production, remove the bind mount and the --reload flag.
 
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: estimator
+      POSTGRES_USER: estimator
+      POSTGRES_PASSWORD: estimator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U estimator -d estimator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   estimator:
     build: .
     container_name: estimator
@@ -16,20 +31,25 @@ services:
     # (redis://localhost:6379) is meant for running uvicorn outside Docker.
     environment:
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql+asyncpg://estimator:estimator@postgres:5432/estimator
 
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
     # Bind-mount the app/ directory so code changes are reflected immediately
-    # inside the container without rebuilding the image. scripts/ and data/
-    # are mounted too so dev-time tools (scripts/compare.py) and the sample
-    # payload (data/budgets_sample.json) are reachable from inside the
-    # container via `docker compose exec`.
+    # inside the container without rebuilding the image. Tests, data and alembic
+    # too: the live session adds ingest sources to data/seed/ and a migration
+    # under alembic/versions/, both expected to survive a container restart.
     volumes:
       - ./app:/app/app
-      - ./scripts:/app/scripts
+      - ./tests:/app/tests
       - ./data:/app/data
+      - ./scripts:/app/scripts
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
 
     # Override the default CMD to enable auto-reload on file changes.
     # Remove --reload for production deployments.
@@ -64,3 +84,4 @@ services:
 
 volumes:
   redis_data:
+  postgres_data:
