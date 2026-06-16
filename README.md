@@ -125,6 +125,20 @@ Only one new entry in [`pyproject.toml`](pyproject.toml): `tiktoken>=0.12.0` (us
  ![ round3](docs/screenshots/round3.png)
 
 
+- Missing to move the `estimator` to its own folder and create a separate folder/project for backend interaction. Will do later on
+
+## Screenshots session handling
+
+- Round1:
+ ![ round1](docs/screenshots/round1.png)
+
+- Round2:
+ ![ round2](docs/screenshots/round2.png)
+
+- Round3:
+ ![ round3](docs/screenshots/round3.png)
+
+
 ## Launch the project
 
 ### Local execution (recommended)
