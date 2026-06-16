@@ -96,7 +96,7 @@ dist/
 *.pid
 .vscode/settings.json
 .vscode/launch.json
-data/
+app/data/
 chroma_db/
 
 # Compiled files

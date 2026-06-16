@@ -1,0 +1,80 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1230 >>
+stream
+BT
+/F1 11 Tf
+50 760 Td
+(BookFlow Landing Page  Technical Brief \(annex\)) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Project: BookFlow marketing landing page + blog \(Acme S.L.\)) Tj
+0 -14 Td
+(Stack: Next.js 14, Tailwind CSS, Sanity CMS, TypeScript.) Tj
+0 -14 Td
+(Hosting: Vercel \(Pro plan, EU region\).) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Functional requirements) Tj
+0 -14 Td
+(- Contact form must POST leads to HubSpot via the v3 API.) Tj
+0 -14 Td
+(- Blog section uses Sanity Studio as WYSIWYG editor \(10 authors\).) Tj
+0 -14 Td
+(- All content must be available in EN and ES \(i18n routing\).) Tj
+0 -14 Td
+(- Cookie banner compliant with EU GDPR + ePrivacy \(Cookiebot\).) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Non-functional constraints) Tj
+0 -14 Td
+(- Lighthouse score 90+ on Performance, Accessibility, SEO.) Tj
+0 -14 Td
+(- Launch before September 1st \(hard deadline, trade-show launch\).) Tj
+0 -14 Td
+(- Budget capped at 12,000 EUR.) Tj
+0 -14 Td
+(- No native mobile app  out of scope for this phase.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Team assumed by the agency) Tj
+0 -14 Td
+(- 1 senior frontend engineer \(full-time\).) Tj
+0 -14 Td
+(- 1 QA engineer \(half-time\).) Tj
+0 -14 Td
+(- Design already provided in Figma  no in-house designer needed.) Tj
+0 -14 Td
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001528 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1598
+%%EOF
