@@ -13,11 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
-from app.dependencies import get_runtime_config
+from app.dependencies import get_runtime_config, get_runtime_retrieval_config
 from app.foundation.llm.runtime_config import (
     MODEL_KEYS,
     RuntimeConfigUnavailable,
     RuntimeModelConfig,
+    RuntimeRetrievalConfig,
 )
 from app.foundation.llm.wrapper import _provider_from_model
 
@@ -65,6 +66,56 @@ def get_models(
 ) -> dict:
     """Current model configuration: effective/default/overridden per knob."""
     return _config_payload(runtime_config, settings)
+
+
+class RetrievalUpdateRequest(BaseModel):
+    """Partial update of the Session 10 retrieval toggles. Only the keys present
+    are touched; ``null`` resets a knob back to its .env default."""
+
+    search_mode: str | None = Field(default=None, description="'vector' or 'hybrid'.")
+    rerank: bool | None = Field(default=None, description="Enable cross-encoder reranking.")
+
+
+@router.get("/retrieval")
+def get_retrieval(
+    runtime_retrieval: RuntimeRetrievalConfig = Depends(get_runtime_retrieval_config),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Current retrieval configuration: effective/default/overridden per toggle."""
+    return {
+        "retrieval": runtime_retrieval.snapshot(),
+        "reranker_model": settings.RERANKER_MODEL,
+    }
+
+
+@router.put("/retrieval")
+def update_retrieval(
+    request: RetrievalUpdateRequest,
+    runtime_retrieval: RuntimeRetrievalConfig = Depends(get_runtime_retrieval_config),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Flip search mode and/or reranking at runtime — effective on the next
+    retrieval, no restart. ``model_fields_set`` distinguishes "reset to default"
+    (explicit ``null``) from "leave untouched" (key absent)."""
+    sent = request.model_fields_set
+    try:
+        if "search_mode" in sent:
+            try:
+                runtime_retrieval.set_search_mode(request.search_mode)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info("runtime_retrieval_changed", key="search_mode", new_value=request.search_mode)
+        if "rerank" in sent:
+            runtime_retrieval.set_rerank(request.rerank)
+            log.info("runtime_retrieval_changed", key="rerank", new_value=request.rerank)
+    except RuntimeConfigUnavailable as exc:
+        log.error("runtime_retrieval_write_failed", error=str(exc)[:200])
+        raise HTTPException(status_code=503, detail="Runtime config store unavailable") from exc
+
+    return {
+        "retrieval": runtime_retrieval.snapshot(),
+        "reranker_model": settings.RERANKER_MODEL,
+    }
 
 
 @router.put("/models")

@@ -131,6 +131,24 @@ class Settings(BaseSettings):
     RETRIEVAL_API_KEY: str | None = None
     ESTIMATE_API_KEY: str | None = None
 
+    # --- Session 10 fields (hybrid search + cross-encoder reranking) ---
+    # Default retrieval mode. "vector" reproduces the Session 9 baseline; "hybrid"
+    # fuses the dense and lexical (full-text) branches with RRF. Switchable per
+    # request (RetrievalRequest.search_mode) and at runtime (RuntimeRetrievalConfig).
+    RETRIEVAL_SEARCH_MODE: Literal["vector", "hybrid"] = "vector"
+    # Whether the cross-encoder reranks by default. Off keeps the baseline cheap;
+    # the recall-then-rerank path turns on per request / at runtime.
+    RERANKER_ENABLED: bool = False
+    # Multilingual cross-encoder (ES+EN), small enough for CPU at teaching latency.
+    RERANKER_MODEL: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    # Recall width before reranking/fusion (recall-then-rerank): retrieve this many
+    # candidates cheaply, then the cross-encoder rescores them down to RERANK_TOP_N.
+    RETRIEVAL_RECALL_TOP_K: int = 50
+    RERANK_TOP_N: int = 5
+    # RRF smoothing constant (Cormack et al. default). Larger = a document must
+    # rank well in BOTH branches to win; smaller = a single #1 can dominate.
+    RRF_K: int = 60
+
     @model_validator(mode="after")
     def validate_at_least_one_api_key(self) -> "Settings":
         """LiteLLM may try either provider via fallback, so we require at least one key."""

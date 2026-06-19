@@ -46,6 +46,9 @@ def generate_calls(monkeypatch):
             "RETRIEVAL_TOP_K": 10,
             "RETRIEVAL_DISTANCE_THRESHOLD": 0.6,
             "MAX_CONTEXT_TOKENS": 100_000,
+            "RETRIEVAL_RECALL_TOP_K": 50,
+            "RERANK_TOP_N": 5,
+            "RRF_K": 60,
         },
     )()
 
@@ -78,10 +81,16 @@ def generate_calls(monkeypatch):
             reasoning="grounded",
         )
 
+    fake_runtime = type(
+        "RT",
+        (),
+        {"effective_search_mode": lambda self: "vector", "effective_rerank": lambda self: False},
+    )()
     monkeypatch.setattr(orch, "get_settings", lambda: settings)
     monkeypatch.setattr(orch, "reformulate_query", fake_reformulate)
-    monkeypatch.setattr(orch, "search_chunks", fake_search)
+    monkeypatch.setattr(orch, "retrieve", fake_search)
     monkeypatch.setattr(orch, "generate_estimate", fake_generate)
+    monkeypatch.setattr(deps, "get_runtime_retrieval_config", lambda: fake_runtime)
     monkeypatch.setattr(
         deps,
         "get_embedder",

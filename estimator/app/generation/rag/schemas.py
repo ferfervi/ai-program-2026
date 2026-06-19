@@ -187,6 +187,11 @@ class RetrievedChunk(BaseModel):
     project_year: int
     chunk_type: str
     distance: float = Field(description="Cosine distance (lower = more similar).")
+    budget_id: str | None = Field(
+        default=None,
+        description="Traceable corpus id of the parent budget (from JSONB metadata). "
+        "Used by the Session 10 retrieval evaluation to grade precision per budget.",
+    )
 
 
 class RetrievalResult(BaseModel):
@@ -282,6 +287,10 @@ class RetrievalRequest(BaseModel):
     project_year_min: int | None = Field(default=None, ge=2010, le=2100)
     project_year_max: int | None = Field(default=None, ge=2010, le=2100)
     chunk_types: list[str] | None = None
+    # Session 10 overrides (None = fall back to runtime/settings default). These
+    # make the four measurement configurations invocable per request.
+    search_mode: Literal["vector", "hybrid"] | None = None
+    rerank: bool | None = None
 
 
 class EstimateRequest(BaseModel):
