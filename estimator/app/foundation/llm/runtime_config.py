@@ -123,7 +123,18 @@ RETRIEVAL_HASH_KEY = "estimator:runtime_retrieval"
 
 SEARCH_MODE_KEY = "RETRIEVAL_SEARCH_MODE"
 RERANK_KEY = "RERANKER_ENABLED"
-RETRIEVAL_KEYS: tuple[str, ...] = (SEARCH_MODE_KEY, RERANK_KEY)
+# Session 10 live: the advanced-pipeline stage toggles, same override pattern so
+# the instructor flips each stage from the Ajustes UI without a restart.
+ROUTING_KEY = "RETRIEVAL_ROUTING_ENABLED"
+QUERY_TRANSFORM_KEY = "QUERY_TRANSFORM_ENABLED"
+TEMPORAL_DECAY_KEY = "TEMPORAL_DECAY_ENABLED"
+RETRIEVAL_KEYS: tuple[str, ...] = (
+    SEARCH_MODE_KEY,
+    RERANK_KEY,
+    ROUTING_KEY,
+    QUERY_TRANSFORM_KEY,
+    TEMPORAL_DECAY_KEY,
+)
 
 _VALID_SEARCH_MODES = ("vector", "hybrid")
 
@@ -166,11 +177,23 @@ class RuntimeRetrievalConfig:
             return override
         return self._settings.RETRIEVAL_SEARCH_MODE
 
-    def effective_rerank(self) -> bool:
-        override = self._get_raw(RERANK_KEY)
+    def _effective_bool(self, key: str, default: bool) -> bool:
+        override = self._get_raw(key)
         if override is None:
-            return self._settings.RERANKER_ENABLED
+            return default
         return override.lower() == "true"
+
+    def effective_rerank(self) -> bool:
+        return self._effective_bool(RERANK_KEY, self._settings.RERANKER_ENABLED)
+
+    def effective_routing(self) -> bool:
+        return self._effective_bool(ROUTING_KEY, self._settings.RETRIEVAL_ROUTING_ENABLED)
+
+    def effective_query_transform(self) -> bool:
+        return self._effective_bool(QUERY_TRANSFORM_KEY, self._settings.QUERY_TRANSFORM_ENABLED)
+
+    def effective_temporal_decay(self) -> bool:
+        return self._effective_bool(TEMPORAL_DECAY_KEY, self._settings.TEMPORAL_DECAY_ENABLED)
 
     def set_search_mode(self, value: str | None) -> None:
         if value is not None and value not in _VALID_SEARCH_MODES:
@@ -179,6 +202,12 @@ class RuntimeRetrievalConfig:
 
     def set_rerank(self, value: bool | None) -> None:
         self._set_raw(RERANK_KEY, None if value is None else str(value).lower())
+
+    def set_bool(self, key: str, value: bool | None) -> None:
+        """Set one of the Session 10 boolean stage toggles (routing/transform/decay)."""
+        if key not in (ROUTING_KEY, QUERY_TRANSFORM_KEY, TEMPORAL_DECAY_KEY):
+            raise ValueError(f"Unknown retrieval toggle: {key}")
+        self._set_raw(key, None if value is None else str(value).lower())
 
     def snapshot(self) -> dict[str, dict[str, object]]:
         """``{effective, default, overridden}`` per retrieval toggle (for the UI)."""
@@ -197,5 +226,20 @@ class RuntimeRetrievalConfig:
                 "effective": self.effective_rerank(),
                 "default": self._settings.RERANKER_ENABLED,
                 "overridden": RERANK_KEY in overrides,
+            },
+            ROUTING_KEY: {
+                "effective": self.effective_routing(),
+                "default": self._settings.RETRIEVAL_ROUTING_ENABLED,
+                "overridden": ROUTING_KEY in overrides,
+            },
+            QUERY_TRANSFORM_KEY: {
+                "effective": self.effective_query_transform(),
+                "default": self._settings.QUERY_TRANSFORM_ENABLED,
+                "overridden": QUERY_TRANSFORM_KEY in overrides,
+            },
+            TEMPORAL_DECAY_KEY: {
+                "effective": self.effective_temporal_decay(),
+                "default": self._settings.TEMPORAL_DECAY_ENABLED,
+                "overridden": TEMPORAL_DECAY_KEY in overrides,
             },
         }

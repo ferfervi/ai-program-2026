@@ -15,6 +15,7 @@ from app.api.rate_limiting import limiter, rate_limit_exceeded_handler
 from app.api.routers.estimate import router as estimate_router
 from app.api.routers.estimate_stages import router as estimate_stages_router
 from app.api.routers.retrieval import router as retrieval_router
+from app.api.routers.retrieval_advanced import router as retrieval_advanced_router
 
 
 def configure_logging() -> None:
@@ -115,6 +116,8 @@ app.include_router(search_router)
 app.include_router(config_api.router)
 # Session 9 — RAG retrieval + grounded estimation (each independently secured).
 app.include_router(retrieval_router)
+# Session 10 — advanced multi-index retrieval (routing, expansion, decay).
+app.include_router(retrieval_advanced_router)
 app.include_router(estimate_router)
 # Per-stage endpoints exposing each pipeline step (wizard / live-session aid).
 app.include_router(estimate_stages_router)

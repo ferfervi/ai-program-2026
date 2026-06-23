@@ -149,6 +149,29 @@ class Settings(BaseSettings):
     # rank well in BOTH branches to win; smaller = a single #1 can dominate.
     RRF_K: int = 60
 
+    # --- Session 10 live fields (advanced retrieval: multi-index pipeline) ------
+    # Each advanced-retrieval stage is independently switchable so it can be
+    # measured in isolation (the full pipeline is the MAX path, not the only one).
+    # These are the .env defaults; routing/transform/decay also flip at runtime
+    # (RuntimeRetrievalConfig → Ajustes UI). Search mode + reranking reuse the
+    # existing RETRIEVAL_SEARCH_MODE / RERANKER_ENABLED toggles above.
+    RETRIEVAL_ROUTING_ENABLED: bool = True
+    QUERY_TRANSFORM_ENABLED: bool = True
+    # Soft re-weight; off by default — turn on only with evidence (Article 6's
+    # warning against magic-number boosts).
+    TEMPORAL_DECAY_ENABLED: bool = False
+    # Small, fast models for the router classifier and the query transformer
+    # (both in AVAILABLE_MODELS, so switchable in the Ajustes tab). Non-reasoning
+    # models on purpose: cheap and no reasoning-token budget to starve the JSON.
+    ROUTER_MODEL: str = "gpt-4o-mini"
+    QUERY_TRANSFORM_MODEL: str = "gpt-4o-mini"
+    # Exponential half-life for temporal decay (weight = 0.5 ** (age/half_life)).
+    # ≈2.5 years: budgets age slowly, so recency only breaks ties.
+    TEMPORAL_DECAY_HALF_LIFE_DAYS: int = 900
+    # Caps for the query transformer (sub-queries) and the router (targets).
+    QUERY_MAX_SUBQUERIES: int = 4
+    ROUTER_MAX_TARGETS: int = 3
+
     @model_validator(mode="after")
     def validate_at_least_one_api_key(self) -> "Settings":
         """LiteLLM may try either provider via fallback, so we require at least one key."""

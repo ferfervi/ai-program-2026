@@ -48,11 +48,12 @@ def test_content_tsv_is_a_generated_fulltext_column():
 
 
 def test_relational_indexes_present():
+    # Session 10 renamed chunks → budget_chunks; index names follow the table.
     index_names = {index.name for index in ChunkRow.__table__.indexes}
     assert index_names == {
-        "ix_chunks_document_id",
-        "ix_chunks_chunk_type",
-        "ix_chunks_metadata_gin",
-        "ix_chunks_content_tsv",  # Session 10 GIN index for full-text search
+        "ix_budget_chunks_document_id",
+        "ix_budget_chunks_chunk_type",
+        "ix_budget_chunks_metadata_gin",
+        "ix_budget_chunks_content_tsv",  # GIN index for full-text search
     }
     assert {index.name for index in DocumentRow.__table__.indexes} == {"ix_documents_source_path"}

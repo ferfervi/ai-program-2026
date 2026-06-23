@@ -17,6 +17,8 @@ Pure and synchronous on purpose — trivially unit-testable, no I/O.
 
 from __future__ import annotations
 
+from itertools import zip_longest
+
 DEFAULT_RRF_K = 60
 
 
@@ -56,3 +58,32 @@ def reciprocal_rank_fusion(
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + position)
 
     return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+
+
+def round_robin_merge(ranked_lists: list[list], *, key=lambda item: item) -> list:
+    """Interleave several ranked lists position-by-position, deduplicating.
+
+    The fusion to use for query DECOMPOSITION (independent sub-queries, each on a
+    different topic). RRF rewards *consensus* — a document many branches agree on
+    floats up — which is wrong here: each sub-query owns a distinct topic, so a
+    topic that only one sub-query covers must still be represented. Round-robin
+    gives every list's #1 a slot before any list's #2, so coverage wins over
+    agreement. The first occurrence of an item (by ``key``) is kept; later
+    duplicates are dropped.
+
+    ``key`` extracts the dedup identity. Across collections, chunk DB ids can
+    collide (each table has its own id sequence), so the caller passes a
+    composite key like ``(chunk.collection, chunk.id)``.
+    """
+    seen: set = set()
+    merged: list = []
+    for column in zip_longest(*ranked_lists):
+        for item in column:
+            if item is None:
+                continue
+            identity = key(item)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(item)
+    return merged

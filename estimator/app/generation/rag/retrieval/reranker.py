@@ -94,6 +94,30 @@ class CrossEncoderReranker:
         )
         return [float(score) for score in scores]
 
+    def rerank_with_scores(
+        self,
+        query: str,
+        candidates: list,
+        *,
+        top_n: int,
+        text_of=lambda candidate: candidate.content,
+    ) -> list[tuple]:
+        """Like :meth:`rerank` but return ``(candidate, score)`` pairs.
+
+        The score is the raw cross-encoder relevance, exposed so a later stage
+        (e.g. temporal decay) can re-weight finalists by a real relevance number
+        rather than by position alone. Order is stable for equal scores.
+        """
+        if not candidates:
+            return []
+        scores = self.score(query, [text_of(candidate) for candidate in candidates])
+        ranked = sorted(
+            zip(candidates, scores),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        return [(candidate, float(score)) for candidate, score in ranked[:top_n]]
+
     def rerank(
         self,
         query: str,
@@ -110,12 +134,9 @@ class CrossEncoderReranker:
         stable for equal scores (Python's sort is stable and the candidates keep
         their recall order).
         """
-        if not candidates:
-            return []
-        scores = self.score(query, [text_of(candidate) for candidate in candidates])
-        ranked = sorted(
-            zip(candidates, scores),
-            key=lambda pair: pair[1],
-            reverse=True,
-        )
-        return [candidate for candidate, _score in ranked[:top_n]]
+        return [
+            candidate
+            for candidate, _score in self.rerank_with_scores(
+                query, candidates, top_n=top_n, text_of=text_of
+            )
+        ]

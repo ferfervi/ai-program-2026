@@ -7,6 +7,7 @@ the vectors plus aggregate stats.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -183,14 +184,38 @@ class RetrievedChunk(BaseModel):
 
     id: int
     content: str
-    sector: str
-    project_year: int
+    # sector/project_year are budget-centric; they default for the Session 10
+    # collections (transcripts, technical docs) that carry no such metadata.
+    sector: str = "unknown"
+    project_year: int = 0
     chunk_type: str
     distance: float = Field(description="Cosine distance (lower = more similar).")
     budget_id: str | None = Field(
         default=None,
         description="Traceable corpus id of the parent budget (from JSONB metadata). "
         "Used by the Session 10 retrieval evaluation to grade precision per budget.",
+    )
+    # --- Session 10 multi-index fields (default-valued → backward compatible) ---
+    collection: str = Field(
+        default="budget",
+        description="Provenance label: which collection this chunk came from "
+        "(budget / transcript / technical_doc). Travels with the chunk for "
+        "attribution, auditing and debugging (Article 5).",
+    )
+    source_id: str | None = Field(
+        default=None,
+        description="Generic traceable id of the parent document, whatever the "
+        "collection (budget_id, transcript_id, doc_id). Used to grade precision.",
+    )
+    relevance_score: float | None = Field(
+        default=None,
+        description="Final relevance score after reranking / fusion, before/after "
+        "temporal decay. Higher = better. None on the plain vector path.",
+    )
+    document_date: date | None = Field(
+        default=None,
+        description="Date used by temporal decay (budget year-start or transcript "
+        "meeting date). None when the collection carries no usable date.",
     )
 
 
@@ -231,13 +256,9 @@ class TaskItem(BaseModel):
     """
 
     name: str
-    description: str | None = Field(
-        default=None, description="One-line scope of the task."
-    )
+    description: str | None = Field(default=None, description="One-line scope of the task.")
     engineer_days: int = Field(ge=0)
-    sources: list[int] = Field(
-        default_factory=list, description="Chunk ids that back this task."
-    )
+    sources: list[int] = Field(default_factory=list, description="Chunk ids that back this task.")
 
 
 class WorkModule(BaseModel):
@@ -245,9 +266,7 @@ class WorkModule(BaseModel):
     grouping the concrete tasks needed to deliver it."""
 
     name: str
-    description: str | None = Field(
-        default=None, description="What this functional block covers."
-    )
+    description: str | None = Field(default=None, description="What this functional block covers.")
     tasks: list[TaskItem] = Field(default_factory=list)
 
 
@@ -362,6 +381,4 @@ class GenerateResult(BaseModel):
         default_factory=list,
         description="Cited source ids not present in kept_chunks (empty = clean).",
     )
-    coherent: bool = Field(
-        description="False when an insufficient estimate still carries numbers."
-    )
+    coherent: bool = Field(description="False when an insufficient estimate still carries numbers.")
