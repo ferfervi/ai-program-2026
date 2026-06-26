@@ -21,5 +21,10 @@ module Rag
     end
 
     def subtotal = tasks.sum { |task| task.engineer_days.to_i }
+
+    # Session 10 hours flow subtotals.
+    def subtotal_hours = tasks.sum { |task| task.estimated_hours.to_i }
+
+    def subtotal_cost = tasks.sum(&:cost_eur)
   end
 end

@@ -15,7 +15,16 @@ from pydantic import BaseModel, Field
 # Closed universe of client sectors present in the sample dataset. Kept as a
 # Literal so a typo or an unexpected sector fails validation loudly instead of
 # silently leaking into the metadata.
-Sector = Literal["finance", "ecommerce", "healthcare", "industrial"]
+Sector = Literal[
+    "finance",
+    "ecommerce",
+    "healthcare",
+    "industrial",
+    "logistics",
+    "education",
+    "media",
+    "government",
+]
 Complexity = Literal["low", "medium", "high"]
 
 
@@ -217,6 +226,12 @@ class RetrievedChunk(BaseModel):
         description="Date used by temporal decay (budget year-start or transcript "
         "meeting date). None when the collection carries no usable date.",
     )
+    estimated_hours: int | None = Field(
+        default=None,
+        description="Historical hours recorded for this chunk (budget component / "
+        "historical task), flattened from JSONB metadata. None for collections that "
+        "carry no hours. Read by the per-task hours estimator (Session 10).",
+    )
 
 
 class RetrievalResult(BaseModel):
@@ -257,7 +272,13 @@ class TaskItem(BaseModel):
 
     name: str
     description: str | None = Field(default=None, description="One-line scope of the task.")
-    engineer_days: int = Field(ge=0)
+    engineer_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Effort in engineer-days. None in the structure-only generation "
+        "mode (Session 10): the LLM proposes the module→task structure and the hours "
+        "are derived afterwards by per-task vector search, not inferred here.",
+    )
     sources: list[int] = Field(default_factory=list, description="Chunk ids that back this task.")
 
 
@@ -361,6 +382,15 @@ class AssembleResult(BaseModel):
     token_count: int = Field(ge=0, description="Tokens in the assembled context block.")
 
 
+class StructureRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/stages/structure`` (Session 10).
+
+    The wizard generates the module→task structure as a free decomposition of the
+    reformulated brief — no retrieval, no sources. Only the query is needed."""
+
+    query: EstimationQuery
+
+
 class GenerateRequest(BaseModel):
     """Payload for ``POST /v1/estimate/stages/generate``.
 
@@ -370,6 +400,12 @@ class GenerateRequest(BaseModel):
     context_block: str = Field(min_length=1)
     query: EstimationQuery
     kept_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    include_hours: bool = Field(
+        default=True,
+        description="When False (Session 10), generate the module→task structure "
+        "WITHOUT hours; the hours are derived later by per-task vector search. "
+        "Defaults to True to preserve the Session 9 single-shot behaviour.",
+    )
 
 
 class GenerateResult(BaseModel):
@@ -382,3 +418,79 @@ class GenerateResult(BaseModel):
         description="Cited source ids not present in kept_chunks (empty = clean).",
     )
     coherent: bool = Field(description="False when an insufficient estimate still carries numbers.")
+
+
+# ---------------------------------------------------------------------------
+# Session 10 — per-task hours estimation by vector search.
+#
+# The structure-only generation produces modules → tasks WITHOUT hours. Each
+# task is then matched against the historical task corpus (chunk_type
+# ``historical_task``); the hours come from a weighted consensus of the nearest
+# neighbours, with a reliability score. A task with no neighbour under the
+# distance threshold gets no hours (surfaced as a red flag in the UI).
+# ---------------------------------------------------------------------------
+
+
+class TaskNeighbor(BaseModel):
+    """One historical task that matched the query task, for transparency."""
+
+    source_id: int = Field(description="DB id of the matched historical_task chunk.")
+    budget_id: str | None = Field(default=None, description="Traceable parent corpus id.")
+    estimated_hours: int = Field(ge=0, description="Hours recorded for this historical task.")
+    distance: float = Field(description="Cosine distance to the query task (lower = closer).")
+
+
+class TaskHoursEstimate(BaseModel):
+    """Hours derived for one task from the historical task corpus.
+
+    ``has_match=False`` (no neighbour under the threshold) leaves
+    ``estimated_hours``/``reliability`` null — the UI flags the row red and the
+    human supplies the number in the validation step.
+    """
+
+    module: str = Field(description="Module the task belongs to (echoed back).")
+    task: str = Field(description="Task name (echoed back).")
+    estimated_hours: int | None = Field(
+        default=None, ge=0, description="Weighted-consensus hours, or null when no match."
+    )
+    reliability: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="0..1 confidence in the hours (closeness × neighbour agreement).",
+    )
+    has_match: bool = Field(description="Whether any neighbour crossed the distance threshold.")
+    dispersion: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Spread of neighbour hours (coefficient of variation); higher = less agreement.",
+    )
+    neighbors: list[TaskNeighbor] = Field(
+        default_factory=list, description="The historical tasks the hours were derived from."
+    )
+
+
+class TaskHoursTaskInput(BaseModel):
+    """One task to estimate (name + optional description)."""
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+
+
+class TaskHoursModuleInput(BaseModel):
+    """One module with its tasks, as reviewed by the human before hours."""
+
+    name: str = Field(min_length=1)
+    tasks: list[TaskHoursTaskInput] = Field(default_factory=list)
+
+
+class TaskHoursRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/tasks/hours``."""
+
+    modules: list[TaskHoursModuleInput] = Field(min_length=1)
+
+
+class TaskHoursResult(BaseModel):
+    """Per-task hours estimates, in the order the tasks were submitted."""
+
+    tasks: list[TaskHoursEstimate] = Field(default_factory=list)

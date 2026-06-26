@@ -20,33 +20,28 @@ module EstimatorAi
       handle_response(json_conn.post("/v1/estimate/stages/reformulate", { transcript: transcript }))
     end
 
-    # Stage 2 — search text → RetrievalResult. The FastAPI schema field is
-    # ``query_text``; the wizard feeds it the composed search text.
-    def retrieve(search_text:, top_k: 10, distance_threshold: 0.6,
-                 sectors: nil, project_year_min: nil, project_year_max: nil, chunk_types: nil)
-      payload = {
-        query_text: search_text,
-        top_k: top_k,
-        distance_threshold: distance_threshold,
-        sectors: sectors.presence,
-        project_year_min: project_year_min,
-        project_year_max: project_year_max,
-        chunk_types: chunk_types.presence
-      }.compact
-      handle_response(json_conn.post("/v1/estimate/stages/retrieve", payload))
+    # Structure-only generation (Session 10): a FREE decomposition of the brief —
+    # no retrieval, no sources. Returns the same shape as the grounded generate
+    # ({ estimate, fabricated_source_ids, coherent }) so the views parse it
+    # unchanged; for a structure, citations are always clean.
+    def generate_structure(query:)
+      handle_response(json_conn.post("/v1/estimate/stages/structure", { query: query }))
     end
 
-    # Stage 3 — chunks → assembled <source> context block (+ what fit the budget).
-    def assemble(chunks:, max_context_tokens: nil)
-      payload = { chunks: chunks, max_context_tokens: max_context_tokens }.compact
-      handle_response(json_conn.post("/v1/estimate/stages/assemble", payload))
-    end
-
-    # Stage 4 — context block + query → grounded estimate + grounding signals.
-    def generate(context_block:, query:, kept_chunks:)
+    # Grounded single-stage generation (Session 9, kept for the side-by-side
+    # comparison demo; the Session 10 wizard uses #generate_structure instead).
+    def generate(context_block:, query:, kept_chunks:, include_hours: true)
       handle_response(json_conn.post("/v1/estimate/stages/generate", {
-        context_block: context_block, query: query, kept_chunks: kept_chunks
+        context_block: context_block, query: query, kept_chunks: kept_chunks,
+        include_hours: include_hours
       }))
+    end
+
+    # Session 10 — per-task hours by vector search over the historical task corpus.
+    # ``modules`` is [{ name:, tasks: [{ name:, description: }] }]; returns
+    # { "tasks" => [TaskHoursEstimate, ...] } with reliability + neighbours.
+    def estimate_task_hours(modules:)
+      handle_response(json_conn.post("/v1/estimate/tasks/hours", { modules: modules }))
     end
 
     # Full pipeline (single shot, idempotent). Kept for the "compare against the

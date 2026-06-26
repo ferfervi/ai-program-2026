@@ -172,6 +172,17 @@ class Settings(BaseSettings):
     QUERY_MAX_SUBQUERIES: int = 4
     ROUTER_MAX_TARGETS: int = 3
 
+    # --- Session 10 live fields (per-task hours estimation) ---------------------
+    # The structure-only generation leaves tasks without hours; each task is then
+    # matched against the historical task corpus (chunk_type 'historical_task') and
+    # the hours come from a weighted consensus of the nearest neighbours. These two
+    # knobs change mid-session (calibrating the red threshold against the corpus),
+    # so they flip at runtime via RuntimeRetrievalConfig → Ajustes UI.
+    TASK_HOURS_TOP_K: int = 5
+    # Cosine-distance floor: a task whose nearest historical task is farther than
+    # this gets NO hours (red flag in the UI) instead of a low-confidence guess.
+    TASK_HOURS_DISTANCE_THRESHOLD: float = 0.45
+
     @model_validator(mode="after")
     def validate_at_least_one_api_key(self) -> "Settings":
         """LiteLLM may try either provider via fallback, so we require at least one key."""

@@ -128,12 +128,18 @@ RERANK_KEY = "RERANKER_ENABLED"
 ROUTING_KEY = "RETRIEVAL_ROUTING_ENABLED"
 QUERY_TRANSFORM_KEY = "QUERY_TRANSFORM_ENABLED"
 TEMPORAL_DECAY_KEY = "TEMPORAL_DECAY_ENABLED"
+# Session 10 live: per-task hours estimation knobs (numeric, not toggles). The
+# distance threshold is the red-flag floor the instructor calibrates mid-session.
+TASK_HOURS_TOP_K_KEY = "TASK_HOURS_TOP_K"
+TASK_HOURS_DISTANCE_THRESHOLD_KEY = "TASK_HOURS_DISTANCE_THRESHOLD"
 RETRIEVAL_KEYS: tuple[str, ...] = (
     SEARCH_MODE_KEY,
     RERANK_KEY,
     ROUTING_KEY,
     QUERY_TRANSFORM_KEY,
     TEMPORAL_DECAY_KEY,
+    TASK_HOURS_TOP_K_KEY,
+    TASK_HOURS_DISTANCE_THRESHOLD_KEY,
 )
 
 _VALID_SEARCH_MODES = ("vector", "hybrid")
@@ -209,6 +215,36 @@ class RuntimeRetrievalConfig:
             raise ValueError(f"Unknown retrieval toggle: {key}")
         self._set_raw(key, None if value is None else str(value).lower())
 
+    def effective_task_hours_top_k(self) -> int:
+        override = self._get_raw(TASK_HOURS_TOP_K_KEY)
+        if override is None:
+            return self._settings.TASK_HOURS_TOP_K
+        try:
+            return int(override)
+        except ValueError:
+            return self._settings.TASK_HOURS_TOP_K
+
+    def effective_task_hours_distance_threshold(self) -> float:
+        override = self._get_raw(TASK_HOURS_DISTANCE_THRESHOLD_KEY)
+        if override is None:
+            return self._settings.TASK_HOURS_DISTANCE_THRESHOLD
+        try:
+            return float(override)
+        except ValueError:
+            return self._settings.TASK_HOURS_DISTANCE_THRESHOLD
+
+    def set_task_hours_top_k(self, value: int | None) -> None:
+        if value is not None and value < 1:
+            raise ValueError("TASK_HOURS_TOP_K must be >= 1")
+        self._set_raw(TASK_HOURS_TOP_K_KEY, None if value is None else str(int(value)))
+
+    def set_task_hours_distance_threshold(self, value: float | None) -> None:
+        if value is not None and not (0.0 <= value <= 2.0):
+            raise ValueError("TASK_HOURS_DISTANCE_THRESHOLD must be in [0, 2]")
+        self._set_raw(
+            TASK_HOURS_DISTANCE_THRESHOLD_KEY, None if value is None else str(float(value))
+        )
+
     def snapshot(self) -> dict[str, dict[str, object]]:
         """``{effective, default, overridden}`` per retrieval toggle (for the UI)."""
         try:
@@ -241,5 +277,15 @@ class RuntimeRetrievalConfig:
                 "effective": self.effective_temporal_decay(),
                 "default": self._settings.TEMPORAL_DECAY_ENABLED,
                 "overridden": TEMPORAL_DECAY_KEY in overrides,
+            },
+            TASK_HOURS_TOP_K_KEY: {
+                "effective": self.effective_task_hours_top_k(),
+                "default": self._settings.TASK_HOURS_TOP_K,
+                "overridden": TASK_HOURS_TOP_K_KEY in overrides,
+            },
+            TASK_HOURS_DISTANCE_THRESHOLD_KEY: {
+                "effective": self.effective_task_hours_distance_threshold(),
+                "default": self._settings.TASK_HOURS_DISTANCE_THRESHOLD,
+                "overridden": TASK_HOURS_DISTANCE_THRESHOLD_KEY in overrides,
             },
         }

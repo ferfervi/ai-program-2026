@@ -10,7 +10,6 @@
 module Rag
   class EstimationRunsController < ApplicationController
     GENERATE_TIMEOUT_SECONDS = 300
-    ALLOWED_SECTORS = %w[finance ecommerce healthcare industrial].freeze
 
     def index
       @runs = Rag::EstimationRun.order(created_at: :desc).limit(20)
@@ -52,83 +51,75 @@ module Rag
       end
     end
 
-    def retrieve
-      @run = Rag::EstimationRun.find(params[:id])
-      guard_rag_errors do
-        filters = retrieval_filters
-        payload = rag_client.retrieve(
-          search_text: @run.reformulation_view&.search_text.to_s,
-          top_k: filters[:top_k],
-          distance_threshold: filters[:distance_threshold],
-          sectors: filters[:sectors],
-          project_year_min: filters[:project_year_min],
-          project_year_max: filters[:project_year_max],
-          chunk_types: filters[:chunk_types]
-        )
-        @run.update!(
-          retrieval: payload.merge("filters" => filters.transform_keys(&:to_s)),
-          status: "retrieved",
-          current_step: "retrieval"
-        )
-        @run.clear_downstream!("retrieval")
-        redirect_to rag_estimation_run_path(@run, step: "retrieval")
-      end
-    end
-
-    def assemble
-      @run = Rag::EstimationRun.find(params[:id])
-      guard_rag_errors do
-        retrieval = @run.retrieval_view
-        payload = rag_client.assemble(
-          chunks: retrieval ? retrieval.chunk_payloads : [],
-          max_context_tokens: params[:max_context_tokens].presence&.to_i
-        )
-        @run.update!(augmentation: payload, status: "assembled", current_step: "augmentation")
-        @run.clear_downstream!("augmentation")
-        redirect_to rag_estimation_run_path(@run, step: "augmentation")
-      end
-    end
-
+    # Structure-only generation (Session 10): a FREE decomposition of the brief —
+    # no retrieval, no sources. The LLM proposes the module→task tree WITHOUT hours;
+    # the hours are derived later by per-task semantic search.
     def generate
       @run = Rag::EstimationRun.find(params[:id])
       guard_rag_errors do
-        augmentation = @run.augmentation_view
         query = @run.reformulation_view&.query
-        payload = rag_client(timeout: GENERATE_TIMEOUT_SECONDS).generate(
-          context_block: augmentation&.context_block.to_s,
-          query: query ? query.to_payload : {},
-          kept_chunks: augmentation ? augmentation.kept_chunk_payloads : []
+        payload = rag_client(timeout: GENERATE_TIMEOUT_SECONDS).generate_structure(
+          query: query ? query.to_payload : {}
         )
         @run.update!(
           generation: payload,
-          adjusted_breakdown: seed_adjusted_breakdown(payload),
+          structure: seed_structure(payload),
           status: "generated",
-          current_step: "generation"
+          current_step: "review"
         )
-        redirect_to rag_estimation_run_path(@run, step: "generation")
+        # Clear downstream of review (stale hours / breakdown from a prior run),
+        # keeping the structure we just seeded.
+        @run.clear_downstream!("review")
+        redirect_to rag_estimation_run_path(@run, step: "review")
       end
     end
 
-    # Human verification: persist the edited breakdown as a version distinct from
-    # the immutable LLM original, recomputing the total authoritatively.
+    # Human review #1 done → persist the edited structure and derive hours per
+    # task by vector search over the historical task corpus.
+    def estimate_hours
+      @run = Rag::EstimationRun.find(params[:id])
+      modules = normalized_structure
+      @run.update!(structure: { "modules" => modules })
+      guard_rag_errors do
+        result = rag_client.estimate_task_hours(modules: structure_for_api(modules))
+        @run.update!(
+          task_hours: result,
+          adjusted_breakdown: seed_breakdown_with_hours(modules, result),
+          status: "hours_estimated",
+          current_step: "hours"
+        )
+        redirect_to rag_estimation_run_path(@run, step: "hours"),
+                    notice: "Horas estimadas por búsqueda vectorial."
+      end
+    end
+
+    # Human review #2: persist the edited hours + rates as the confirmed estimate,
+    # recomputing the total cost authoritatively.
     def verify
       @run = Rag::EstimationRun.find(params[:id])
-      modules = normalized_modules
-      total = modules.sum { |m| m["tasks"].sum { |t| t["engineer_days"] } }
+      modules = normalized_cost_modules
+      total_hours = modules.sum { |m| m["tasks"].sum { |t| t["estimated_hours"].to_i } }
+      total_cost = modules.sum do |m|
+        m["tasks"].sum { |t| t["estimated_hours"].to_i * t["rate_eur_per_hour"].to_i }
+      end
       @run.update!(
         adjusted_breakdown: {
           "modules" => modules,
-          "total_engineer_days" => total,
-          "adjusted_at" => Time.current.iso8601
+          "total_hours" => total_hours,
+          "total_cost_eur" => total_cost,
+          "confirmed_at" => Time.current.iso8601
         },
-        status: "verified",
+        status: "confirmed",
         current_step: "verification"
       )
       redirect_to rag_estimation_run_path(@run, step: "verification"),
-                  notice: "Estimación verificada y guardada."
+                  notice: "Estimación confirmada y almacenada."
     end
 
     private
+
+    # Default blended rate seeded into the breakdown; the human edits it per task.
+    DEFAULT_RATE_EUR_PER_HOUR = 75
 
     STEP_OR_CURRENT = lambda do |run, requested|
       step = requested.presence || run.current_step
@@ -145,71 +136,114 @@ module Rag
       @run.clear_downstream!("reformulation")
     end
 
-    def retrieval_filters
-      {
-        top_k: params[:top_k].presence&.to_i&.clamp(1, 30) || 10,
-        distance_threshold: params[:distance_threshold].presence&.to_f&.clamp(0.0, 2.0) || 0.6,
-        sectors: Array(params[:sectors]).select { |s| ALLOWED_SECTORS.include?(s) }.presence,
-        project_year_min: params[:project_year_min].presence&.to_i,
-        project_year_max: params[:project_year_max].presence&.to_i,
-        chunk_types: Array(params[:chunk_types]).map(&:to_s).compact_blank.presence
-      }
-    end
-
-    # Start the editable table as a copy of the LLM modular breakdown (empty when
-    # the estimate is insufficient — the user can add modules/tasks manually).
-    def seed_adjusted_breakdown(generation_payload)
+    # Seed the editable STRUCTURE from the structure-only generation (no hours).
+    # Empty when the estimate is insufficient — the user adds modules/tasks by hand.
+    def seed_structure(generation_payload)
       estimate = generation_payload.fetch("estimate", {})
       modules = Array(estimate["modules"]).map do |m|
         m = m.transform_keys(&:to_s)
         {
           "name" => m["name"].to_s,
           "description" => m["description"].to_s,
-          "tasks" => Array(m["tasks"]).map { |t| seed_task(t) }
+          "tasks" => Array(m["tasks"]).map { |t| seed_structure_task(t) }
         }
       end
-      {
-        "modules" => modules,
-        "total_engineer_days" => total_of(modules),
-        "adjusted_at" => nil # nil = not yet human-verified, just the seeded copy
-      }
+      { "modules" => modules }
     end
 
-    def seed_task(raw)
+    def seed_structure_task(raw)
       raw = raw.transform_keys(&:to_s)
       { "name" => raw["name"].to_s, "description" => raw["description"].to_s,
-        "engineer_days" => raw["engineer_days"].to_i,
         "sources" => Array(raw["sources"]).map(&:to_i) }
     end
 
-    # Parse the nested modules→tasks params (integer-indexed hashes from the
-    # Stimulus editor). Drops modules/tasks with a blank name.
-    def normalized_modules
-      raw_modules = params[:modules]
-      return [] if raw_modules.blank?
+    # Merge the per-task hours estimates back into the structure to seed the
+    # editable cost breakdown: each task gains estimated_hours / hours_reliability
+    # / has_match (matched by module + task name) and a default rate.
+    def seed_breakdown_with_hours(modules, hours_result)
+      lookup = {}
+      Array(hours_result["tasks"]).each do |t|
+        t = t.transform_keys(&:to_s)
+        lookup[[ t["module"].to_s, t["task"].to_s ]] = t
+      end
 
-      values_of(raw_modules).filter_map do |raw_module|
+      seeded = modules.map do |m|
+        tasks = Array(m["tasks"]).map do |task|
+          hit = lookup[[ m["name"].to_s, task["name"].to_s ]] || {}
+          matched = hit.fetch("has_match", false)
+          {
+            "name" => task["name"], "description" => task["description"],
+            "sources" => Array(task["sources"]).map(&:to_i),
+            "estimated_hours" => hit["estimated_hours"],
+            "hours_reliability" => hit["reliability"],
+            "has_match" => matched,
+            "rate_eur_per_hour" => DEFAULT_RATE_EUR_PER_HOUR
+          }
+        end
+        { "name" => m["name"], "description" => m["description"], "tasks" => tasks }
+      end
+
+      total_hours = seeded.sum { |m| m["tasks"].sum { |t| t["estimated_hours"].to_i } }
+      {
+        "modules" => seeded,
+        "total_hours" => total_hours,
+        "total_cost_eur" => total_hours * DEFAULT_RATE_EUR_PER_HOUR,
+        "confirmed_at" => nil # nil = seeded draft, not yet human-confirmed
+      }
+    end
+
+    # The shape POSTed to /v1/estimate/tasks/hours: modules → tasks (name + desc).
+    def structure_for_api(modules)
+      modules.map do |m|
+        {
+          name: m["name"],
+          tasks: Array(m["tasks"]).map { |t| { name: t["name"], description: t["description"] } }
+        }
+      end
+    end
+
+    # --- param parsing (integer-indexed hashes from the Stimulus editor) --------
+
+    # Review #1 structure: name / description / sources, NO hours yet.
+    def normalized_structure
+      values_of(params[:modules]).filter_map do |raw_module|
         attrs = to_h(raw_module)
         name = attrs["name"].to_s.strip
         next if name.blank?
 
-        tasks = values_of(attrs["tasks"]).filter_map { |t| normalized_task(t) }
+        tasks = values_of(attrs["tasks"]).filter_map do |t|
+          ta = to_h(t)
+          tname = ta["name"].to_s.strip
+          next if tname.blank?
+
+          { "name" => tname, "description" => ta["description"].to_s,
+            "sources" => parse_sources(ta["sources"]) }
+        end
         { "name" => name, "description" => attrs["description"].to_s, "tasks" => tasks }
       end
     end
 
-    def normalized_task(raw_task)
-      attrs = to_h(raw_task)
-      name = attrs["name"].to_s.strip
-      return nil if name.blank?
+    # Review #2 cost breakdown: hours + rate per task (and the carried metadata).
+    def normalized_cost_modules
+      values_of(params[:modules]).filter_map do |raw_module|
+        attrs = to_h(raw_module)
+        name = attrs["name"].to_s.strip
+        next if name.blank?
 
-      { "name" => name, "description" => attrs["description"].to_s,
-        "engineer_days" => attrs["engineer_days"].to_i,
-        "sources" => parse_sources(attrs["sources"]) }
-    end
+        tasks = values_of(attrs["tasks"]).filter_map do |t|
+          ta = to_h(t)
+          tname = ta["name"].to_s.strip
+          next if tname.blank?
 
-    def total_of(modules)
-      modules.sum { |m| Array(m["tasks"]).sum { |t| t["engineer_days"].to_i } }
+          hours = ta["estimated_hours"].presence&.to_i
+          { "name" => tname, "description" => ta["description"].to_s,
+            "estimated_hours" => hours,
+            "rate_eur_per_hour" => ta["rate_eur_per_hour"].to_i,
+            "has_match" => !hours.nil?,
+            "sources" => parse_sources(ta["sources"]) }
+        end
+        { "name" => name, "description" => attrs["description"].to_s, "tasks" => tasks }
+      end
     end
 
     # Integer-indexed params arrive as a hash {"0" => {...}, "1" => {...}};

@@ -36,7 +36,7 @@ from app.config import get_settings
 from app.dependencies import get_embedder, get_token_encoder
 from app.generation.rag.context_assembler import build_context_block, truncate_to_token_budget
 from app.generation.rag.errors import RagError, RetrievalError
-from app.generation.rag.estimator import generate_estimate
+from app.generation.rag.estimator import generate_estimate, generate_structure
 from app.generation.rag.observability import log_stage
 from app.generation.rag.query_reformulator import compose_search_text, reformulate_query
 from app.generation.rag.retriever import search_chunks
@@ -49,6 +49,7 @@ from app.generation.rag.schemas import (
     ReformulationResult,
     RetrievalRequest,
     RetrievalResult,
+    StructureRequest,
 )
 from app.generation.rag.validation import check_coherence, validate_citations
 
@@ -142,6 +143,27 @@ async def assemble(request: Request, payload: AssembleRequest) -> AssembleResult
 
 
 @router.post(
+    "/structure",
+    response_model=GenerateResult,
+    dependencies=[Depends(require_estimate_key)],
+)
+@limiter.limit("15/minute")
+async def structure(request: Request, payload: StructureRequest) -> GenerateResult:
+    """Session 10 — generate the module→task structure as a FREE decomposition of
+    the brief (no retrieval, no sources). Returns the same ``GenerateResult`` shape
+    as ``/generate`` (citations always clean) so the wizard parses it unchanged."""
+    request_id = get_request_id(request)
+    try:
+        with log_stage("structure", request_id):
+            estimate = await generate_structure(payload.query)
+    except RagError as exc:
+        log.error("stage_failed", stage="structure", error_type=type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Structure generation failed.") from exc
+
+    return GenerateResult(estimate=estimate, fabricated_source_ids=[], coherent=True)
+
+
+@router.post(
     "/generate",
     response_model=GenerateResult,
     dependencies=[Depends(require_estimate_key)],
@@ -155,8 +177,17 @@ async def generate(request: Request, payload: GenerateRequest) -> GenerateResult
     wizard can surface them as a teaching moment."""
     request_id = get_request_id(request)
     try:
-        with log_stage("generation", request_id, sources=len(payload.kept_chunks)):
-            estimate = await generate_estimate(payload.context_block, structured_query=payload.query)
+        with log_stage(
+            "generation",
+            request_id,
+            sources=len(payload.kept_chunks),
+            include_hours=payload.include_hours,
+        ):
+            estimate = await generate_estimate(
+                payload.context_block,
+                structured_query=payload.query,
+                include_hours=payload.include_hours,
+            )
     except RagError as exc:
         log.error("stage_failed", stage="generation", error_type=type(exc).__name__)
         raise HTTPException(status_code=502, detail="Estimate generation failed.") from exc

@@ -30,10 +30,9 @@ Rails.application.routes.draw do
     resources :estimation_runs, only: [ :index, :new, :create, :show ] do
       member do
         post  :reformulate
-        post  :retrieve
-        post  :assemble
-        post  :generate
-        patch :verify
+        post  :generate       # free structure-only decomposition (no RAG)
+        post  :estimate_hours # save reviewed structure → per-task semantic search → hours
+        patch :verify         # edit hours/rates, compute cost, confirm + store
       end
     end
   end

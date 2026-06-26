@@ -23,18 +23,6 @@ class RagEstimationRunsControllerTest < ActionDispatch::IntegrationTest
                  headers: { "Content-Type" => "application/json" })
   end
 
-  def chunk(id)
-    { "id" => id, "content" => "Auth component ~#{id} eng-days", "sector" => "ecommerce",
-      "project_year" => 2024, "chunk_type" => "budget_component", "distance" => 0.3 + id / 100.0 }
-  end
-
-  def stub_retrieve(chunks: [ chunk(1), chunk(2) ], low_confidence: false, candidates: 12)
-    stub_request(:post, %r{#{STAGES}/retrieve})
-      .to_return(status: 200,
-                 body: { chunks: chunks, low_confidence: low_confidence, candidates_evaluated: candidates }.to_json,
-                 headers: { "Content-Type" => "application/json" })
-  end
-
   def run_with_reformulation
     stub_reformulate
     transcript = "x" * 150
@@ -71,120 +59,113 @@ class RagEstimationRunsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # --- retrieve --------------------------------------------------------------
+  # --- generate (structure-only, no RAG) -------------------------------------
 
-  test "retrieve persists chunks and the filters used" do
-    run = run_with_reformulation
-    stub_retrieve
-    post retrieve_rag_estimation_run_path(run),
-         params: { top_k: 5, distance_threshold: 0.5, sectors: [ "ecommerce" ] }
-    run.reload
-    assert_equal 2, run.retrieval_view.chunks.size
-    assert_equal 5, run.retrieval["filters"]["top_k"]
-    assert_equal [ "ecommerce" ], run.retrieval["filters"]["sectors"]
-    assert_redirected_to rag_estimation_run_path(run, step: "retrieval")
-  end
-
-  test "soft-fail retrieval renders the alert and blocks continue" do
-    run = run_with_reformulation
-    stub_retrieve(chunks: [], low_confidence: true, candidates: 9)
-    post retrieve_rag_estimation_run_path(run), params: { distance_threshold: 0.2 }
-    follow_redirect!
-    assert_response :success
-    assert_match "Soft-fail", response.body
-    assert_no_match "Continuar → Augmentation", response.body
-  end
-
-  # --- assemble --------------------------------------------------------------
-
-  test "assemble persists the context block" do
-    run = run_with_reformulation
-    stub_retrieve
-    post retrieve_rag_estimation_run_path(run), params: {}
-    run.reload
-
-    stub_request(:post, %r{#{STAGES}/assemble})
+  def stub_structure(estimate:)
+    stub_request(:post, %r{#{STAGES}/structure})
       .to_return(status: 200,
-                 body: { context_block: "<source id=\"1\">x</source>", kept_chunks: [ chunk(1) ],
-                         dropped_count: 1, token_count: 42 }.to_json,
-                 headers: { "Content-Type" => "application/json" })
-
-    post assemble_rag_estimation_run_path(run), params: {}
-    run.reload
-    assert_equal 42, run.augmentation_view.token_count
-    assert_equal 1, run.augmentation_view.dropped_count
-    assert_redirected_to rag_estimation_run_path(run, step: "augmentation")
-  end
-
-  # --- generate --------------------------------------------------------------
-
-  def stub_generate(estimate:, fabricated: [], coherent: true)
-    stub_request(:post, %r{#{STAGES}/generate})
-      .to_return(status: 200,
-                 body: { estimate: estimate, fabricated_source_ids: fabricated, coherent: coherent }.to_json,
+                 body: { estimate: estimate, fabricated_source_ids: [], coherent: true }.to_json,
                  headers: { "Content-Type" => "application/json" })
   end
 
-  test "generate persists the estimate and seeds the editable breakdown" do
+  test "generate produces a structure-only tree (no RAG) and routes to human review" do
     run = run_with_reformulation
-    run.update!(augmentation: { "context_block" => "<source/>", "kept_chunks" => [ chunk(1) ],
-                                "dropped_count" => 0, "token_count" => 10 })
     estimate = {
-      "total_engineer_days" => 18, "confidence" => "high", "reasoning" => "from sources",
+      "total_engineer_days" => nil, "confidence" => "high", "reasoning" => "decomposed from the brief",
       "modules" => [
-        { "name" => "Auth", "tasks" => [ { "name" => "OAuth", "engineer_days" => 12, "sources" => [ 1 ] } ] },
-        { "name" => "Checkout", "tasks" => [ { "name" => "Cart", "engineer_days" => 6, "sources" => [ 2 ] } ] }
+        { "name" => "Auth", "tasks" => [ { "name" => "OAuth", "sources" => [] } ] },
+        { "name" => "Checkout", "tasks" => [ { "name" => "Cart", "sources" => [] } ] }
       ],
       "sources" => [], "assumptions" => []
     }
-    stub_generate(estimate: estimate)
+    stub = stub_structure(estimate: estimate)
 
     post generate_rag_estimation_run_path(run), params: {}
     run.reload
-    assert_equal 18, run.generation_view.estimate.total_engineer_days
-    # Editable table seeded as a copy of the LLM modular breakdown.
-    assert_equal 2, run.adjusted_modules.size
-    assert_equal 18, run.adjusted_total
-    assert_redirected_to rag_estimation_run_path(run, step: "generation")
+    # The wizard calls the ungrounded structure endpoint, not the grounded generate.
+    assert_requested stub
+    # The editable STRUCTURE is seeded (no hours yet); not the cost breakdown.
+    assert_equal 2, run.structure_modules.size
+    assert_not run.adjusted?
+    assert_equal "generated", run.status
+    assert_redirected_to rag_estimation_run_path(run, step: "review")
   end
 
-  # --- verify ----------------------------------------------------------------
+  # --- estimate_hours (per-task vector search) --------------------------------
 
-  test "verify recomputes the total server-side and persists the nested adjusted version" do
+  def stub_task_hours(tasks:)
+    stub_request(:post, %r{/v1/estimate/tasks/hours})
+      .to_return(status: 200, body: { tasks: tasks }.to_json,
+                 headers: { "Content-Type" => "application/json" })
+  end
+
+  test "estimate_hours saves the reviewed structure and derives per-task hours" do
     run = Rag::EstimationRun.create!(transcript: "x" * 150,
-      generation: { "estimate" => { "confidence" => "high", "reasoning" => "r",
-        "modules" => [ { "name" => "Auth", "tasks" => [
-          { "name" => "OAuth", "engineer_days" => 12, "sources" => [ 1 ] } ] } ] },
-        "fabricated_source_ids" => [], "coherent" => true })
+      structure: { "modules" => [ { "name" => "Auth", "tasks" => [ { "name" => "OAuth" } ] } ] })
+
+    stub = stub_task_hours(tasks: [
+      { module: "Auth", task: "OAuth", estimated_hours: 40, reliability: 0.8, has_match: true,
+        dispersion: 0.1, neighbors: [ { source_id: 1, budget_id: "b", estimated_hours: 40, distance: 0.1 } ] },
+      { module: "Auth", task: "RBAC", has_match: false }
+    ])
+
+    patch_params = {
+      modules: { "0" => { name: "Auth", description: "Access", tasks: {
+        "0" => { name: "OAuth", sources: "1" },
+        "1" => { name: "RBAC", sources: "" }
+      } } }
+    }
+    post estimate_hours_rag_estimation_run_path(run), params: patch_params
+    run.reload
+
+    assert_requested stub
+    assert_equal 2, run.task_hours_view.total_count
+    assert_equal 1, run.task_hours_view.flagged_count
+    # The cost breakdown is seeded with the matched hours + a default rate.
+    seeded_task = run.adjusted_modules.first.tasks.first
+    assert_equal 40, seeded_task.estimated_hours
+    assert seeded_task.rate_eur_per_hour.positive?
+    assert run.adjusted_modules.first.tasks.last.flagged?
+    assert_equal "hours_estimated", run.status
+    assert_redirected_to rag_estimation_run_path(run, step: "hours")
+  end
+
+  # --- verify (cost confirmation) ---------------------------------------------
+
+  test "verify recomputes the cost server-side and stores the confirmed estimate" do
+    run = Rag::EstimationRun.create!(transcript: "x" * 150,
+      task_hours: { "tasks" => [] },
+      adjusted_breakdown: { "modules" => [], "total_hours" => 0, "total_cost_eur" => 0, "confirmed_at" => nil })
 
     # Nested, integer-indexed params (as the Stimulus editor serialises them).
     patch verify_rag_estimation_run_path(run), params: {
       modules: {
         "0" => { name: "Auth", description: "Access", tasks: {
-          "0" => { name: "OAuth", engineer_days: "20", sources: "1, 2" },
-          "1" => { name: "RBAC", engineer_days: "8", sources: "" },
-          "2" => { name: "", engineer_days: "99", sources: "" } # blank task dropped
+          "0" => { name: "OAuth", estimated_hours: "40", rate_eur_per_hour: "80", sources: "1, 2" },
+          "1" => { name: "RBAC", estimated_hours: "10", rate_eur_per_hour: "60", sources: "" },
+          "2" => { name: "", estimated_hours: "99", rate_eur_per_hour: "99", sources: "" } # blank task dropped
         } },
         "1" => { name: "", tasks: {} } # blank module dropped
       }
     }
     run.reload
-    assert_equal "verified", run.status
+    assert_equal "confirmed", run.status
     assert_equal 1, run.adjusted_modules.size
     assert_equal 2, run.adjusted_modules.first.tasks.size
-    assert_equal 28, run.adjusted_total # 20 + 8, blanks dropped, recomputed server-side
+    assert_equal 50, run.adjusted_total_hours # 40 + 10
+    assert_equal 3800, run.adjusted_total_cost # 40*80 + 10*60
     assert_equal [ 1, 2 ], run.adjusted_modules.first.tasks.first.sources
-    assert run.adjusted_breakdown["adjusted_at"].present?
+    assert run.confirmed?
   end
 
   # --- error mapping ---------------------------------------------------------
 
   test "a 502 from a stage surfaces as a flash on redirect" do
     run = run_with_reformulation
-    stub_request(:post, %r{#{STAGES}/retrieve})
-      .to_return(status: 502, body: { detail: "Retrieval failed." }.to_json,
+    stub_request(:post, %r{#{STAGES}/structure})
+      .to_return(status: 502, body: { detail: "Structure generation failed." }.to_json,
                  headers: { "Content-Type" => "application/json" })
-    post retrieve_rag_estimation_run_path(run), params: {}
+    post generate_rag_estimation_run_path(run), params: {}
     assert_response :redirect
     follow_redirect!
     assert_match(/servicio IA/i, response.body)
@@ -192,52 +173,52 @@ class RagEstimationRunsControllerTest < ActionDispatch::IntegrationTest
 
   # --- show renders every wizard step ----------------------------------------
 
-  test "show renders augmentation, generation and verification screens" do
+  test "show renders generation, review, hours and verification screens" do
     run = Rag::EstimationRun.create!(
       transcript: "x" * 200,
       reformulation: { "query" => { "function" => "online store", "sector" => "ecommerce",
                                     "scale" => "medium", "technologies" => [ "Stripe" ] },
                        "search_text" => "online store stripe" },
-      retrieval: { "chunks" => [ chunk(1) ], "low_confidence" => false, "candidates_evaluated" => 12,
-                   "filters" => { "top_k" => 10, "distance_threshold" => 0.6 } },
-      augmentation: { "context_block" => "<source id=\"1\">Auth</source>", "kept_chunks" => [ chunk(1) ],
-                      "dropped_count" => 2, "token_count" => 120 },
-      generation: { "estimate" => { "total_engineer_days" => 18, "duration_weeks" => 6,
-                    "confidence" => "high", "reasoning" => "Derived from sources",
+      generation: { "estimate" => { "total_engineer_days" => nil, "duration_weeks" => nil,
+                    "confidence" => "high", "reasoning" => "Decomposed from the brief",
                     "modules" => [ { "name" => "Auth", "description" => "Access", "tasks" => [
-                      { "name" => "OAuth", "engineer_days" => 12, "sources" => [ 1 ] } ] } ],
-                    "sources" => [ { "source_id" => 1, "relevance" => "primary", "used_for" => "auth" } ],
-                    "assumptions" => [ { "description" => "No SSO", "impact" => "low", "rationale" => "n/a" } ] },
+                      { "name" => "OAuth", "sources" => [] } ] } ],
+                    "sources" => [], "assumptions" => [] },
                     "fabricated_source_ids" => [], "coherent" => true },
+      structure: { "modules" => [ { "name" => "Auth", "description" => "Access",
+                     "tasks" => [ { "name" => "OAuth", "sources" => [] } ] } ] },
+      task_hours: { "tasks" => [ { "module" => "Auth", "task" => "OAuth", "estimated_hours" => 40,
+                                   "reliability" => 0.8, "has_match" => true } ] },
       adjusted_breakdown: { "modules" => [ { "name" => "Auth", "tasks" => [
-                              { "name" => "OAuth", "engineer_days" => 12, "sources" => [ 1 ] } ] } ],
-                            "total_engineer_days" => 12, "adjusted_at" => nil }
+                              { "name" => "OAuth", "estimated_hours" => 40, "rate_eur_per_hour" => 75,
+                                "hours_reliability" => 0.8, "has_match" => true, "sources" => [] } ] } ],
+                            "total_hours" => 40, "total_cost_eur" => 3000, "confirmed_at" => nil }
     )
-
-    get rag_estimation_run_path(run, step: "augmentation")
-    assert_response :success
-    assert_match "&lt;source id=", response.body # XML block, html-escaped
-    assert_match "Tokens del contexto", response.body
 
     get rag_estimation_run_path(run, step: "generation")
     assert_response :success
-    assert_match "eng-días", response.body
-    assert_match "Citaciones", response.body
+    assert_match "Confianza estructura", response.body
+    assert_match "decomposición libre", response.body
+
+    get rag_estimation_run_path(run, step: "review")
+    assert_response :success
+    assert_select "input[name='modules[0][tasks][0][name]']"
+    assert_match "Estimar horas por tarea", response.body
+
+    get rag_estimation_run_path(run, step: "hours")
+    assert_response :success
+    assert_match "fiab.", response.body
 
     get rag_estimation_run_path(run, step: "verification")
     assert_response :success
-    assert_select "input[name='modules[0][name]']"
-    assert_select "input[name='modules[0][tasks][0][name]']"
-    assert_select "template[data-estimate-modules-editor-target='moduleTemplate']"
+    assert_select "input[name='modules[0][tasks][0][estimated_hours]']"
+    assert_select "input[name='modules[0][tasks][0][rate_eur_per_hour]']"
     assert_select "template[data-estimate-modules-editor-target='taskTemplate']"
-    assert_match "Original del LLM", response.body
   end
 
   test "show renders the grounding warning when citations are fabricated" do
     run = Rag::EstimationRun.create!(
       transcript: "x" * 200,
-      augmentation: { "context_block" => "<source id=\"1\">x</source>", "kept_chunks" => [ chunk(1) ],
-                      "dropped_count" => 0, "token_count" => 10 },
       generation: { "estimate" => { "confidence" => "high", "reasoning" => "r",
                     "modules" => [], "sources" => [], "assumptions" => [] },
                     "fabricated_source_ids" => [ 999 ], "coherent" => true }

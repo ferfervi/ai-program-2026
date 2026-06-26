@@ -92,6 +92,13 @@ class RetrievalUpdateRequest(BaseModel):
     temporal_decay_enabled: bool | None = Field(
         default=None, description="Enable temporal decay re-weighting."
     )
+    # Session 10 live: per-task hours estimation knobs (numeric).
+    task_hours_top_k: int | None = Field(
+        default=None, ge=1, le=30, description="Neighbours per task for the hours consensus."
+    )
+    task_hours_distance_threshold: float | None = Field(
+        default=None, ge=0.0, le=2.0, description="Red-flag floor: no match beyond this distance."
+    )
 
 
 @router.get("/retrieval")
@@ -134,6 +141,28 @@ def update_retrieval(
                     key=field_name,
                     new_value=getattr(request, field_name),
                 )
+        if "task_hours_top_k" in sent:
+            try:
+                runtime_retrieval.set_task_hours_top_k(request.task_hours_top_k)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info(
+                "runtime_retrieval_changed",
+                key="task_hours_top_k",
+                new_value=request.task_hours_top_k,
+            )
+        if "task_hours_distance_threshold" in sent:
+            try:
+                runtime_retrieval.set_task_hours_distance_threshold(
+                    request.task_hours_distance_threshold
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info(
+                "runtime_retrieval_changed",
+                key="task_hours_distance_threshold",
+                new_value=request.task_hours_distance_threshold,
+            )
     except RuntimeConfigUnavailable as exc:
         log.error("runtime_retrieval_write_failed", error=str(exc)[:200])
         raise HTTPException(status_code=503, detail="Runtime config store unavailable") from exc

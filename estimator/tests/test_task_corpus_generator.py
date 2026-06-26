@@ -40,3 +40,29 @@ def test_corpus_is_task_granular():
     assert tasks >= 120
     modules = {c["module"] for project in corpus for c in project["components"]}
     assert len(modules) >= 8
+
+
+def test_default_corpus_is_large_and_diverse():
+    # The default corpus was scaled up (60 projects) and broadened: it must span
+    # all eight sectors and a wide set of modules so the per-task hours search has
+    # plenty of historical analogs to match.
+    corpus = generate_corpus()  # default count/seed
+    assert len(corpus) == 60
+    budgets = [Budget.model_validate(project) for project in corpus]
+    tasks = sum(len(b.components) for b in budgets)
+    assert tasks >= 800
+    sectors = {b.client_metadata.sector for b in budgets}
+    assert sectors == {
+        "finance",
+        "ecommerce",
+        "healthcare",
+        "industrial",
+        "logistics",
+        "education",
+        "media",
+        "government",
+    }
+    modules = {c.module for b in budgets for c in b.components}
+    assert len(modules) >= 20
+    ids = [b.budget_id for b in budgets]
+    assert len(ids) == len(set(ids))

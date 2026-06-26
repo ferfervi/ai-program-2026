@@ -13,6 +13,9 @@
   --color-success:       #1FC16B;
   --color-success-light: #84EBB4;
 
+  --color-danger:        #E5484D;
+  --color-danger-light:  #FF9592;
+
   --font-sans: "Helvetica", "Arial", sans-serif;
 
   --tracking-tight:   -0.02em;

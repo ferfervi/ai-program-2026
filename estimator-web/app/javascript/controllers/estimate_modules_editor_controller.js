@@ -6,7 +6,7 @@ import { Controller } from "@hotwired/stimulus"
 // Serialization uses explicit integer indices so Rails coalesces the nested
 // structure unambiguously:
 //   modules[<m>][name] / [description]
-//   modules[<m>][tasks][<t>][name] / [description] / [engineer_days] / [sources]
+//   modules[<m>][tasks][<t>][name] / [description] / [estimated_hours] / [rate_eur_per_hour] / [sources]
 // Indices only need to be unique (gaps are fine — the controller sorts by index
 // server-side). New modules/tasks get a monotonic index; deletes leave holes.
 //
@@ -74,19 +74,26 @@ export default class extends Controller {
     this.recompute()
   }
 
+  // Cost = hours × rate, summed per module and across modules. In structure mode
+  // (review #1) there are no hours/rate inputs, so every subtotal is 0 and the
+  // total targets are simply absent — recompute is a harmless no-op there.
   recompute() {
     let grand = 0
     this.moduleElements.forEach((moduleEl) => {
       let subtotal = 0
-      moduleEl.querySelectorAll("[data-estimate-days]").forEach((input) => {
-        const value = parseInt(input.value, 10)
-        if (Number.isFinite(value)) subtotal += value
+      moduleEl.querySelectorAll("[data-task]").forEach((row) => {
+        const hours = parseInt(row.querySelector("[data-estimate-hours]")?.value, 10)
+        const rate = parseInt(row.querySelector("[data-estimate-rate]")?.value, 10)
+        const cost = (Number.isFinite(hours) ? hours : 0) * (Number.isFinite(rate) ? rate : 0)
+        const cell = row.querySelector("[data-task-cost]")
+        if (cell) cell.textContent = cost.toLocaleString("es-ES")
+        subtotal += cost
       })
       const subtotalEl = moduleEl.querySelector("[data-module-subtotal]")
-      if (subtotalEl) subtotalEl.textContent = subtotal
+      if (subtotalEl) subtotalEl.textContent = subtotal.toLocaleString("es-ES")
       grand += subtotal
     })
-    if (this.hasTotalTarget) this.totalTarget.textContent = grand
+    if (this.hasTotalTarget) this.totalTarget.textContent = grand.toLocaleString("es-ES")
     if (this.hasTotalFieldTarget) this.totalFieldTarget.value = grand
   }
 

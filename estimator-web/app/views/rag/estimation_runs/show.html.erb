@@ -7,8 +7,9 @@
     <span class="text-xs font-mono text-white/40">run #<%= @run.id %></span>
   </div>
   <p class="text-white/50 text-sm mb-6">
-    Transcripción → reformulación → retrieval → augmentation → generación → verificación humana.
-    Cada etapa llama a su endpoint del servicio IA y puedes re-ejecutarla.
+    Transcripción → reformulación → generación de estructura (sin RAG) → revisión humana →
+    horas por búsqueda semántica (híbrido + reranking) → validación humana. Cada etapa llama a su
+    endpoint del servicio IA y puedes re-ejecutarla.
   </p>
 
   <%= render "progress", run: @run, step: step %>

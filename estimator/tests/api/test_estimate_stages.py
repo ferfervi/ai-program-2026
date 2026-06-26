@@ -171,7 +171,7 @@ def test_generate_flags_fabricated_citations(client, monkeypatch):
         ],
     )
 
-    async def fake_generate(context_block, structured_query):
+    async def fake_generate(context_block, structured_query, include_hours=True):
         return estimate
 
     monkeypatch.setattr(stages, "generate_estimate", fake_generate)
@@ -191,7 +191,7 @@ def test_generate_flags_incoherent_insufficient(client, monkeypatch):
         insufficient_context_explanation="should not have numbers",
     )
 
-    async def fake_generate(context_block, structured_query):
+    async def fake_generate(context_block, structured_query, include_hours=True):
         return estimate
 
     monkeypatch.setattr(stages, "generate_estimate", fake_generate)
@@ -199,6 +199,39 @@ def test_generate_flags_incoherent_insufficient(client, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["coherent"] is False
+
+
+# --- structure (Session 10: free decomposition, no retrieval/sources) -------
+
+
+def test_structure_returns_clean_estimate_without_sources(client, monkeypatch):
+    estimate = Estimate(
+        confidence="high",
+        reasoning="decomposed from the brief",
+        modules=[{"name": "Auth", "tasks": [{"name": "OAuth login"}, {"name": "RBAC"}]}],
+    )
+
+    async def fake_structure(query):
+        return estimate
+
+    monkeypatch.setattr(stages, "generate_structure", fake_structure)
+    r = client.post(
+        "/v1/estimate/stages/structure",
+        json={"query": EstimationQuery(function="b2b payments portal").model_dump()},
+        headers=_h(),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Structure-only: no hours, no citations, always coherent/clean.
+    assert body["estimate"]["modules"][0]["tasks"][0]["engineer_days"] is None
+    assert body["fabricated_source_ids"] == []
+    assert body["coherent"] is True
+
+
+def test_structure_requires_estimate_key(client):
+    body = {"query": {"function": "x"}}
+    assert client.post("/v1/estimate/stages/structure", json=body).status_code == 401
+    assert client.post("/v1/estimate/stages/structure", json=body, headers=_h(RET_KEY)).status_code == 401
 
 
 # --- regression: existing endpoints still authenticate ---------------------

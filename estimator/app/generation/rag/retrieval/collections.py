@@ -100,6 +100,7 @@ class CollectionSpec:
             source_id=md.get(self.source_id_key),
             relevance_score=relevance_score,
             document_date=self.date_of(md),
+            estimated_hours=md.get("estimated_hours"),
         )
 
     def hard_filter_clauses(self, filters: HardFilters) -> list:
