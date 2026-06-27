@@ -7,6 +7,7 @@ the vectors plus aggregate stats.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -14,7 +15,16 @@ from pydantic import BaseModel, Field
 # Closed universe of client sectors present in the sample dataset. Kept as a
 # Literal so a typo or an unexpected sector fails validation loudly instead of
 # silently leaking into the metadata.
-Sector = Literal["finance", "ecommerce", "healthcare", "industrial"]
+Sector = Literal[
+    "finance",
+    "ecommerce",
+    "healthcare",
+    "industrial",
+    "logistics",
+    "education",
+    "media",
+    "government",
+]
 Complexity = Literal["low", "medium", "high"]
 
 
@@ -32,6 +42,10 @@ class BudgetComponent(BaseModel):
     component_id: str = Field(description="Stable id within the budget, e.g. 'AUTH-001'.")
     name: str = Field(description="Short human-readable component name.")
     description: str = Field(description="Detailed description of the work.")
+    module: str | None = Field(
+        default=None,
+        description="Functional block this component/task belongs to (e.g. 'Payments').",
+    )
     tech_stack: list[str] = Field(
         default_factory=list, description="Technologies involved in this component."
     )
@@ -90,6 +104,12 @@ class IngestRequest(BaseModel):
         min_length=1, max_length=50, description="Document family, e.g. 'historical_budget'."
     )
     content: Budget = Field(description="Full budget JSON, as produced upstream.")
+    chunk_type: str = Field(
+        default="budget_component",
+        max_length=50,
+        description="chunk_type stamped on every chunk (filterable). Defaults keep S08 behaviour; "
+        "the task corpus uses 'historical_task'.",
+    )
 
 
 class IngestResponse(BaseModel):
@@ -130,3 +150,347 @@ class SearchResponse(BaseModel):
     k: int
     search_time_ms: int = Field(ge=0)
     results: list[SearchHit]
+
+
+# ---------------------------------------------------------------------------
+# Session 9 — RAG estimation pipeline (query understanding → generation).
+#
+# These types implement the locked contract from the Session 9 articles. They
+# live alongside the Session 8 search types above; nothing here replaces them.
+# ---------------------------------------------------------------------------
+
+Scale = Literal["small", "medium", "large", "unknown"]
+Confidence = Literal["high", "medium", "low", "insufficient"]
+Relevance = Literal["primary", "supporting", "tangential"]
+Impact = Literal["high", "medium", "low"]
+
+
+class EstimationQuery(BaseModel):
+    """Structured brief distilled from a raw meeting transcript.
+
+    This is the output of the query-understanding stage: a transcript is full of
+    digressions, so we extract only what drives retrieval (what to build, with
+    which tech, under which constraints) instead of embedding the raw text.
+    """
+
+    function: str = Field(description="Functional summary of the project.")
+    technologies: list[str] = Field(default_factory=list)
+    sector: str | None = None
+    scale: Scale = "unknown"
+    country: str | None = None
+    regulations: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+
+
+class RetrievedChunk(BaseModel):
+    """One chunk returned by the metadata-filtered retriever.
+
+    ``id`` is the chunk's DB primary key (cited as a ``source id`` downstream).
+    ``sector``/``project_year`` are flattened from the chunk's JSONB metadata
+    (``client_sector``/``year``) so the generator and the citation validator see
+    a stable, typed shape.
+    """
+
+    id: int
+    content: str
+    # sector/project_year are budget-centric; they default for the Session 10
+    # collections (transcripts, technical docs) that carry no such metadata.
+    sector: str = "unknown"
+    project_year: int = 0
+    chunk_type: str
+    distance: float = Field(description="Cosine distance (lower = more similar).")
+    budget_id: str | None = Field(
+        default=None,
+        description="Traceable corpus id of the parent budget (from JSONB metadata). "
+        "Used by the Session 10 retrieval evaluation to grade precision per budget.",
+    )
+    # --- Session 10 multi-index fields (default-valued → backward compatible) ---
+    collection: str = Field(
+        default="budget",
+        description="Provenance label: which collection this chunk came from "
+        "(budget / transcript / technical_doc). Travels with the chunk for "
+        "attribution, auditing and debugging (Article 5).",
+    )
+    source_id: str | None = Field(
+        default=None,
+        description="Generic traceable id of the parent document, whatever the "
+        "collection (budget_id, transcript_id, doc_id). Used to grade precision.",
+    )
+    relevance_score: float | None = Field(
+        default=None,
+        description="Final relevance score after reranking / fusion, before/after "
+        "temporal decay. Higher = better. None on the plain vector path.",
+    )
+    document_date: date | None = Field(
+        default=None,
+        description="Date used by temporal decay (budget year-start or transcript "
+        "meeting date). None when the collection carries no usable date.",
+    )
+    estimated_hours: int | None = Field(
+        default=None,
+        description="Historical hours recorded for this chunk (budget component / "
+        "historical task), flattened from JSONB metadata. None for collections that "
+        "carry no hours. Read by the per-task hours estimator (Session 10).",
+    )
+
+
+class RetrievalResult(BaseModel):
+    """Outcome of the retrieval stage."""
+
+    chunks: list[RetrievedChunk]
+    low_confidence: bool = Field(
+        description="True when no chunk crossed the distance threshold (soft-fail)."
+    )
+    candidates_evaluated: int = Field(
+        ge=0, description="Total chunks scored before applying the threshold/limit."
+    )
+
+
+class SourceCitation(BaseModel):
+    """A reference from the estimate back to a retrieved chunk."""
+
+    source_id: int = Field(description="DB id of the cited chunk (a RetrievedChunk.id).")
+    relevance: Relevance
+    used_for: str = Field(description="What this source contributed to the estimate.")
+
+
+class Assumption(BaseModel):
+    """An estimate component NOT backed by any retrieved source."""
+
+    description: str
+    impact: Impact
+    rationale: str
+
+
+class TaskItem(BaseModel):
+    """One concrete engineering task inside a functional module, in engineer-days.
+
+    ``sources`` cite the historical chunk(s) the task was derived from; a task
+    with no historical analog is left uncited and should surface as an
+    :class:`Assumption` instead.
+    """
+
+    name: str
+    description: str | None = Field(default=None, description="One-line scope of the task.")
+    engineer_days: int | None = Field(
+        default=None,
+        ge=0,
+        description="Effort in engineer-days. None in the structure-only generation "
+        "mode (Session 10): the LLM proposes the module→task structure and the hours "
+        "are derived afterwards by per-task vector search, not inferred here.",
+    )
+    sources: list[int] = Field(default_factory=list, description="Chunk ids that back this task.")
+
+
+class WorkModule(BaseModel):
+    """A functional block (e.g. Auth, Payments, Data, Frontend, Infra, QA, PM)
+    grouping the concrete tasks needed to deliver it."""
+
+    name: str
+    description: str | None = Field(default=None, description="What this functional block covers.")
+    tasks: list[TaskItem] = Field(default_factory=list)
+
+
+class Estimate(BaseModel):
+    """Grounded estimate produced from retrieved historical budgets.
+
+    Hours-based (engineer-days) with mandatory citations — distinct from the
+    Session 4 ``EstimationResult`` (euros/weeks/phases). The breakdown is
+    organised into functional modules, each decomposed into concrete tasks.
+    When the retrieved context is insufficient, ``confidence='insufficient'``
+    and the numeric totals stay ``None`` with ``modules`` empty (enforced by
+    :func:`validation.check_coherence`).
+    """
+
+    total_engineer_days: int | None = None
+    modules: list[WorkModule] = Field(default_factory=list)
+    duration_weeks: int | None = None
+    sources: list[SourceCitation] = Field(default_factory=list)
+    assumptions: list[Assumption] = Field(default_factory=list)
+    confidence: Confidence
+    reasoning: str = Field(description="How the estimate was derived from the sources.")
+    insufficient_context_explanation: str | None = None
+
+
+# ---- HTTP request models for the Session 9 routers ------------------------
+# Named ``RetrievalRequest``/``EstimateRequest`` (not ``SearchRequest``) to
+# avoid colliding with the Session 8 ``SearchRequest`` above.
+
+
+class RetrievalRequest(BaseModel):
+    """Payload for ``POST /v1/retrieval/search`` (threshold + structural filters)."""
+
+    query_text: str = Field(min_length=10, max_length=2000)
+    top_k: int = Field(default=10, ge=1, le=30)
+    distance_threshold: float = Field(default=0.6, ge=0.0, le=2.0)
+    sectors: list[str] | None = None
+    project_year_min: int | None = Field(default=None, ge=2010, le=2100)
+    project_year_max: int | None = Field(default=None, ge=2010, le=2100)
+    chunk_types: list[str] | None = None
+    # Session 10 overrides (None = fall back to runtime/settings default). These
+    # make the four measurement configurations invocable per request.
+    search_mode: Literal["vector", "hybrid"] | None = None
+    rerank: bool | None = None
+
+
+class EstimateRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/from-transcript``."""
+
+    transcript: str = Field(min_length=100, max_length=50_000)
+    idempotency_key: str | None = Field(default=None, max_length=128)
+
+
+# ---- Per-stage request/response models for the wizard (S09 teaching aid) ---
+# The full pipeline (``estimate_from_transcript``) hides its intermediate
+# artifacts; these stateless stage endpoints expose each step so a UI can run
+# the pipeline one stage at a time. They REUSE the pure functions in this
+# package — they do not re-implement any pipeline logic. Retrieval reuses
+# ``RetrievalRequest``/``RetrievalResult`` above (zero new schema).
+
+
+class ReformulateRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/stages/reformulate``."""
+
+    transcript: str = Field(min_length=100, max_length=50_000)
+
+
+class ReformulationResult(BaseModel):
+    """Output of the query-understanding stage: the structured brief plus the
+    canonical search text that gets embedded for retrieval."""
+
+    query: EstimationQuery
+    search_text: str = Field(description="Corpus-aligned text fed to the embedder.")
+
+
+class AssembleRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/stages/assemble``.
+
+    ``max_context_tokens`` defaults (server-side) to ``MAX_CONTEXT_TOKENS`` when
+    omitted; a small value lets a demo show whole-chunk truncation."""
+
+    chunks: list[RetrievedChunk]
+    max_context_tokens: int | None = Field(default=None, ge=256, le=64_000)
+
+
+class AssembleResult(BaseModel):
+    """Output of the augmentation stage: the assembled ``<source>`` block plus
+    what survived the token budget."""
+
+    context_block: str
+    kept_chunks: list[RetrievedChunk]
+    dropped_count: int = Field(ge=0, description="Chunks dropped by the token budget.")
+    token_count: int = Field(ge=0, description="Tokens in the assembled context block.")
+
+
+class StructureRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/stages/structure`` (Session 10).
+
+    The wizard generates the module→task structure as a free decomposition of the
+    reformulated brief — no retrieval, no sources. Only the query is needed."""
+
+    query: EstimationQuery
+
+
+class GenerateRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/stages/generate``.
+
+    ``kept_chunks`` are the chunks the context block was built from; they are
+    used to validate citations (no fabricated source ids) after generation."""
+
+    context_block: str = Field(min_length=1)
+    query: EstimationQuery
+    kept_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    include_hours: bool = Field(
+        default=True,
+        description="When False (Session 10), generate the module→task structure "
+        "WITHOUT hours; the hours are derived later by per-task vector search. "
+        "Defaults to True to preserve the Session 9 single-shot behaviour.",
+    )
+
+
+class GenerateResult(BaseModel):
+    """Output of the generation stage: the estimate plus the grounding signals
+    the wizard surfaces (instead of auto-retrying like the full pipeline)."""
+
+    estimate: Estimate
+    fabricated_source_ids: list[int] = Field(
+        default_factory=list,
+        description="Cited source ids not present in kept_chunks (empty = clean).",
+    )
+    coherent: bool = Field(description="False when an insufficient estimate still carries numbers.")
+
+
+# ---------------------------------------------------------------------------
+# Session 10 — per-task hours estimation by vector search.
+#
+# The structure-only generation produces modules → tasks WITHOUT hours. Each
+# task is then matched against the historical task corpus (chunk_type
+# ``historical_task``); the hours come from a weighted consensus of the nearest
+# neighbours, with a reliability score. A task with no neighbour under the
+# distance threshold gets no hours (surfaced as a red flag in the UI).
+# ---------------------------------------------------------------------------
+
+
+class TaskNeighbor(BaseModel):
+    """One historical task that matched the query task, for transparency."""
+
+    source_id: int = Field(description="DB id of the matched historical_task chunk.")
+    budget_id: str | None = Field(default=None, description="Traceable parent corpus id.")
+    estimated_hours: int = Field(ge=0, description="Hours recorded for this historical task.")
+    distance: float = Field(description="Cosine distance to the query task (lower = closer).")
+
+
+class TaskHoursEstimate(BaseModel):
+    """Hours derived for one task from the historical task corpus.
+
+    ``has_match=False`` (no neighbour under the threshold) leaves
+    ``estimated_hours``/``reliability`` null — the UI flags the row red and the
+    human supplies the number in the validation step.
+    """
+
+    module: str = Field(description="Module the task belongs to (echoed back).")
+    task: str = Field(description="Task name (echoed back).")
+    estimated_hours: int | None = Field(
+        default=None, ge=0, description="Weighted-consensus hours, or null when no match."
+    )
+    reliability: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="0..1 confidence in the hours (closeness × neighbour agreement).",
+    )
+    has_match: bool = Field(description="Whether any neighbour crossed the distance threshold.")
+    dispersion: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Spread of neighbour hours (coefficient of variation); higher = less agreement.",
+    )
+    neighbors: list[TaskNeighbor] = Field(
+        default_factory=list, description="The historical tasks the hours were derived from."
+    )
+
+
+class TaskHoursTaskInput(BaseModel):
+    """One task to estimate (name + optional description)."""
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+
+
+class TaskHoursModuleInput(BaseModel):
+    """One module with its tasks, as reviewed by the human before hours."""
+
+    name: str = Field(min_length=1)
+    tasks: list[TaskHoursTaskInput] = Field(default_factory=list)
+
+
+class TaskHoursRequest(BaseModel):
+    """Payload for ``POST /v1/estimate/tasks/hours``."""
+
+    modules: list[TaskHoursModuleInput] = Field(min_length=1)
+
+
+class TaskHoursResult(BaseModel):
+    """Per-task hours estimates, in the order the tasks were submitted."""
+
+    tasks: list[TaskHoursEstimate] = Field(default_factory=list)

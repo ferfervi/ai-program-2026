@@ -13,15 +13,26 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
-from app.dependencies import get_runtime_config
+from app.dependencies import get_runtime_config, get_runtime_retrieval_config
 from app.foundation.llm.runtime_config import (
     MODEL_KEYS,
+    QUERY_TRANSFORM_KEY,
+    ROUTING_KEY,
+    TEMPORAL_DECAY_KEY,
     RuntimeConfigUnavailable,
     RuntimeModelConfig,
+    RuntimeRetrievalConfig,
 )
 from app.foundation.llm.wrapper import _provider_from_model
 
 log = structlog.get_logger()
+
+# Maps the PUT request field → the Redis hash key for the Session 10 stage toggles.
+_STAGE_TOGGLE_KEYS = {
+    "routing_enabled": ROUTING_KEY,
+    "query_transform_enabled": QUERY_TRANSFORM_KEY,
+    "temporal_decay_enabled": TEMPORAL_DECAY_KEY,
+}
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
 
@@ -65,6 +76,101 @@ def get_models(
 ) -> dict:
     """Current model configuration: effective/default/overridden per knob."""
     return _config_payload(runtime_config, settings)
+
+
+class RetrievalUpdateRequest(BaseModel):
+    """Partial update of the Session 10 retrieval toggles. Only the keys present
+    are touched; ``null`` resets a knob back to its .env default."""
+
+    search_mode: str | None = Field(default=None, description="'vector' or 'hybrid'.")
+    rerank: bool | None = Field(default=None, description="Enable cross-encoder reranking.")
+    # Session 10 live: advanced-pipeline stage toggles.
+    routing_enabled: bool | None = Field(default=None, description="Enable multi-index routing.")
+    query_transform_enabled: bool | None = Field(
+        default=None, description="Enable query expansion/decomposition."
+    )
+    temporal_decay_enabled: bool | None = Field(
+        default=None, description="Enable temporal decay re-weighting."
+    )
+    # Session 10 live: per-task hours estimation knobs (numeric).
+    task_hours_top_k: int | None = Field(
+        default=None, ge=1, le=30, description="Neighbours per task for the hours consensus."
+    )
+    task_hours_distance_threshold: float | None = Field(
+        default=None, ge=0.0, le=2.0, description="Red-flag floor: no match beyond this distance."
+    )
+
+
+@router.get("/retrieval")
+def get_retrieval(
+    runtime_retrieval: RuntimeRetrievalConfig = Depends(get_runtime_retrieval_config),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Current retrieval configuration: effective/default/overridden per toggle."""
+    return {
+        "retrieval": runtime_retrieval.snapshot(),
+        "reranker_model": settings.RERANKER_MODEL,
+    }
+
+
+@router.put("/retrieval")
+def update_retrieval(
+    request: RetrievalUpdateRequest,
+    runtime_retrieval: RuntimeRetrievalConfig = Depends(get_runtime_retrieval_config),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Flip search mode and/or reranking at runtime — effective on the next
+    retrieval, no restart. ``model_fields_set`` distinguishes "reset to default"
+    (explicit ``null``) from "leave untouched" (key absent)."""
+    sent = request.model_fields_set
+    try:
+        if "search_mode" in sent:
+            try:
+                runtime_retrieval.set_search_mode(request.search_mode)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info("runtime_retrieval_changed", key="search_mode", new_value=request.search_mode)
+        if "rerank" in sent:
+            runtime_retrieval.set_rerank(request.rerank)
+            log.info("runtime_retrieval_changed", key="rerank", new_value=request.rerank)
+        for field_name, hash_key in _STAGE_TOGGLE_KEYS.items():
+            if field_name in sent:
+                runtime_retrieval.set_bool(hash_key, getattr(request, field_name))
+                log.info(
+                    "runtime_retrieval_changed",
+                    key=field_name,
+                    new_value=getattr(request, field_name),
+                )
+        if "task_hours_top_k" in sent:
+            try:
+                runtime_retrieval.set_task_hours_top_k(request.task_hours_top_k)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info(
+                "runtime_retrieval_changed",
+                key="task_hours_top_k",
+                new_value=request.task_hours_top_k,
+            )
+        if "task_hours_distance_threshold" in sent:
+            try:
+                runtime_retrieval.set_task_hours_distance_threshold(
+                    request.task_hours_distance_threshold
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            log.info(
+                "runtime_retrieval_changed",
+                key="task_hours_distance_threshold",
+                new_value=request.task_hours_distance_threshold,
+            )
+    except RuntimeConfigUnavailable as exc:
+        log.error("runtime_retrieval_write_failed", error=str(exc)[:200])
+        raise HTTPException(status_code=503, detail="Runtime config store unavailable") from exc
+
+    return {
+        "retrieval": runtime_retrieval.snapshot(),
+        "reranker_model": settings.RERANKER_MODEL,
+    }
 
 
 @router.put("/models")
