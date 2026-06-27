@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     AVAILABLE_MODELS: list[str] = [
         "gpt-4o-mini",
         "gpt-4o",
+        "gpt-5",
+        "gpt-5-mini",
         "claude-haiku-4-5-20251001",
         "claude-sonnet-4-5",
     ]
@@ -99,6 +101,87 @@ class Settings(BaseSettings):
     # parent budget. Prompt caching makes the (large) parent document cheap to
     # reuse across the chunks of the same budget.
     CONTEXTUAL_CHUNKER_MODEL: str = "claude-sonnet-4-5"
+
+    # --- Session 9 fields (RAG estimation: transcript → grounded estimate) ---
+    # Query understanding distills a transcript into an EstimationQuery; a small
+    # model is enough. Generation reasons over retrieved budgets, so it uses the
+    # strongest model with medium reasoning effort. Both go through LLMWrapper.
+    REFORMULATION_MODEL: str = "gpt-5-mini"
+    GENERATION_MODEL: str = "gpt-5"
+    # "high" drives a deeper, more consistent module→task decomposition (the S09
+    # article used "medium"; we raise it for the granular modular breakdown).
+    GENERATION_REASONING_EFFORT: Literal["minimal", "low", "medium", "high"] = "high"
+    # Token ceiling (reasoning + output) for the RAG structured calls. gpt-5 is a
+    # reasoning model: its reasoning tokens count against this budget, so the
+    # 4000 wrapper default leaves nothing for the JSON and the call truncates
+    # (finish_reason='length'). Generous headroom so high-effort reasoning can
+    # finish AND emit the larger nested (modules→tasks) Estimate. It is a CAP,
+    # not a target — the model only spends what it needs, so a high value adds no
+    # latency on its own.
+    GENERATION_MAX_TOKENS: int = 64000
+    # Retrieval knobs (locked defaults from the Session 9 articles).
+    RETRIEVAL_TOP_K: int = 10
+    RETRIEVAL_DISTANCE_THRESHOLD: float = 0.6
+    # Token budget for the assembled <source> context block (tiktoken cl100k_base).
+    MAX_CONTEXT_TOKENS: int = 16384
+    # Idempotency cache for POST /v1/estimate/from-transcript (seconds; 24h).
+    IDEMPOTENCY_TTL: int = 86400
+    # API keys for the two Session 9 routers. None disables the router (401 on
+    # every request) — set them in .env to enable the endpoints.
+    RETRIEVAL_API_KEY: str | None = None
+    ESTIMATE_API_KEY: str | None = None
+
+    # --- Session 10 fields (hybrid search + cross-encoder reranking) ---
+    # Default retrieval mode. "vector" reproduces the Session 9 baseline; "hybrid"
+    # fuses the dense and lexical (full-text) branches with RRF. Switchable per
+    # request (RetrievalRequest.search_mode) and at runtime (RuntimeRetrievalConfig).
+    RETRIEVAL_SEARCH_MODE: Literal["vector", "hybrid"] = "vector"
+    # Whether the cross-encoder reranks by default. Off keeps the baseline cheap;
+    # the recall-then-rerank path turns on per request / at runtime.
+    RERANKER_ENABLED: bool = False
+    # Multilingual cross-encoder (ES+EN), small enough for CPU at teaching latency.
+    RERANKER_MODEL: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    # Recall width before reranking/fusion (recall-then-rerank): retrieve this many
+    # candidates cheaply, then the cross-encoder rescores them down to RERANK_TOP_N.
+    RETRIEVAL_RECALL_TOP_K: int = 50
+    RERANK_TOP_N: int = 5
+    # RRF smoothing constant (Cormack et al. default). Larger = a document must
+    # rank well in BOTH branches to win; smaller = a single #1 can dominate.
+    RRF_K: int = 60
+
+    # --- Session 10 live fields (advanced retrieval: multi-index pipeline) ------
+    # Each advanced-retrieval stage is independently switchable so it can be
+    # measured in isolation (the full pipeline is the MAX path, not the only one).
+    # These are the .env defaults; routing/transform/decay also flip at runtime
+    # (RuntimeRetrievalConfig → Ajustes UI). Search mode + reranking reuse the
+    # existing RETRIEVAL_SEARCH_MODE / RERANKER_ENABLED toggles above.
+    RETRIEVAL_ROUTING_ENABLED: bool = True
+    QUERY_TRANSFORM_ENABLED: bool = True
+    # Soft re-weight; off by default — turn on only with evidence (Article 6's
+    # warning against magic-number boosts).
+    TEMPORAL_DECAY_ENABLED: bool = False
+    # Small, fast models for the router classifier and the query transformer
+    # (both in AVAILABLE_MODELS, so switchable in the Ajustes tab). Non-reasoning
+    # models on purpose: cheap and no reasoning-token budget to starve the JSON.
+    ROUTER_MODEL: str = "gpt-4o-mini"
+    QUERY_TRANSFORM_MODEL: str = "gpt-4o-mini"
+    # Exponential half-life for temporal decay (weight = 0.5 ** (age/half_life)).
+    # ≈2.5 years: budgets age slowly, so recency only breaks ties.
+    TEMPORAL_DECAY_HALF_LIFE_DAYS: int = 900
+    # Caps for the query transformer (sub-queries) and the router (targets).
+    QUERY_MAX_SUBQUERIES: int = 4
+    ROUTER_MAX_TARGETS: int = 3
+
+    # --- Session 10 live fields (per-task hours estimation) ---------------------
+    # The structure-only generation leaves tasks without hours; each task is then
+    # matched against the historical task corpus (chunk_type 'historical_task') and
+    # the hours come from a weighted consensus of the nearest neighbours. These two
+    # knobs change mid-session (calibrating the red threshold against the corpus),
+    # so they flip at runtime via RuntimeRetrievalConfig → Ajustes UI.
+    TASK_HOURS_TOP_K: int = 5
+    # Cosine-distance floor: a task whose nearest historical task is farther than
+    # this gets NO hours (red flag in the UI) instead of a low-confidence guess.
+    TASK_HOURS_DISTANCE_THRESHOLD: float = 0.45
 
     @model_validator(mode="after")
     def validate_at_least_one_api_key(self) -> "Settings":

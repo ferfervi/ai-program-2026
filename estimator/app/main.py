@@ -1,14 +1,22 @@
 import structlog
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from app.config import get_settings
 from app.api.embeddings import router as embeddings_router
 from app.api.search import router as search_router
 from app.api import config as config_api
 from app.api import estimations, ingestion, sessions
+from app.api.rate_limiting import limiter, rate_limit_exceeded_handler
+from app.api.routers.estimate import router as estimate_router
+from app.api.routers.estimate_stages import router as estimate_stages_router
+from app.api.routers.estimate_tasks import router as estimate_tasks_router
+from app.api.routers.retrieval import router as retrieval_router
+from app.api.routers.retrieval_advanced import router as retrieval_advanced_router
 
 
 def configure_logging() -> None:
@@ -79,12 +87,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Session 9: per-API-key rate limiting (slowapi). The decorators on the routers
+# read ``app.state.limiter``; a custom handler turns the limit breach into a
+# JSON 429 with a ``Retry-After`` header.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Assign a correlation id per request, bind it for structlog, and echo it
+    back on the ``X-Request-ID`` response header so failures are debuggable."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        structlog.contextvars.unbind_contextvars("request_id")
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 app.include_router(estimations.router)
 app.include_router(sessions.router)
 app.include_router(ingestion.router)
 app.include_router(embeddings_router)
 app.include_router(search_router)
 app.include_router(config_api.router)
+# Session 9 — RAG retrieval + grounded estimation (each independently secured).
+app.include_router(retrieval_router)
+# Session 10 — advanced multi-index retrieval (routing, expansion, decay).
+app.include_router(retrieval_advanced_router)
+app.include_router(estimate_router)
+# Per-stage endpoints exposing each pipeline step (wizard / live-session aid).
+app.include_router(estimate_stages_router)
+# Session 10 — per-task hours estimation by vector search (structure → hours).
+app.include_router(estimate_tasks_router)
 
 
 @app.get("/health")

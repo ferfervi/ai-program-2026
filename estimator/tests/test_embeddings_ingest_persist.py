@@ -52,9 +52,16 @@ class FakeRagIngestService:
         self.duplicate_of = duplicate_of
         self.calls: list[dict] = []
 
-    async def ingest(self, *, source_path, document_type, budget) -> IngestResponse:
+    async def ingest(
+        self, *, source_path, document_type, budget, chunk_type="budget_component"
+    ) -> IngestResponse:
         self.calls.append(
-            {"source_path": source_path, "document_type": document_type, "budget": budget}
+            {
+                "source_path": source_path,
+                "document_type": document_type,
+                "budget": budget,
+                "chunk_type": chunk_type,
+            }
         )
         if self.duplicate_of is not None:
             raise DuplicateDocumentError(self.duplicate_of)
@@ -88,6 +95,22 @@ def test_ingest_persists_and_returns_contract():
     }
     # The router passes the validated Budget through, not the raw dict.
     assert fake.calls[0]["budget"].budget_id == "BUD-2024-001"
+    # chunk_type defaults to budget_component when the payload omits it.
+    assert fake.calls[0]["chunk_type"] == "budget_component"
+
+
+def test_ingest_forwards_custom_chunk_type():
+    fake = FakeRagIngestService()
+    app.dependency_overrides[get_rag_ingest_service] = lambda: fake
+
+    payload = make_ingest_payload() | {
+        "document_type": "historical_task_breakdown",
+        "chunk_type": "historical_task",
+    }
+    response = TestClient(app).post("/embeddings/ingest", json=payload)
+
+    assert response.status_code == 200
+    assert fake.calls[0]["chunk_type"] == "historical_task"
 
 
 def test_ingest_duplicate_returns_409_with_literal_shape():

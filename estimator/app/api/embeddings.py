@@ -10,7 +10,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.dependencies import (  
+from app.dependencies import (
     ALL_STRATEGIES,
     build_chunkers,
     get_embedder,
@@ -55,6 +55,7 @@ async def ingest(
             source_path=request.source_path,
             document_type=request.document_type,
             budget=request.content,
+            chunk_type=request.chunk_type,
         )
     except DuplicateDocumentError as exc:
         # JSONResponse (not HTTPException) to keep the exercise's literal

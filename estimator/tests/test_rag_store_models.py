@@ -9,6 +9,7 @@ CASCADE FK and the deliberate absence of a vector index.
 from __future__ import annotations
 
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import TSVECTOR
 
 from app.generation.rag.store.models import ChunkRow, DocumentRow
 
@@ -38,11 +39,21 @@ def test_no_vector_index_yet():
     assert "embedding" not in index_columns
 
 
+def test_content_tsv_is_a_generated_fulltext_column():
+    # Session 10: STORED generated tsvector backing the lexical search branch.
+    content_tsv = ChunkRow.__table__.c.content_tsv
+    assert isinstance(content_tsv.type, TSVECTOR)
+    assert content_tsv.computed is not None  # GENERATED ALWAYS AS ...
+    assert content_tsv.computed.persisted is True  # ... STORED
+
+
 def test_relational_indexes_present():
+    # Session 10 renamed chunks → budget_chunks; index names follow the table.
     index_names = {index.name for index in ChunkRow.__table__.indexes}
     assert index_names == {
-        "ix_chunks_document_id",
-        "ix_chunks_chunk_type",
-        "ix_chunks_metadata_gin",
+        "ix_budget_chunks_document_id",
+        "ix_budget_chunks_chunk_type",
+        "ix_budget_chunks_metadata_gin",
+        "ix_budget_chunks_content_tsv",  # GIN index for full-text search
     }
     assert {index.name for index in DocumentRow.__table__.indexes} == {"ix_documents_source_path"}

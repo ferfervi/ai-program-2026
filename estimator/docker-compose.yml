@@ -2,21 +2,6 @@
 # For production, remove the bind mount and the --reload flag.
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: estimator
-      POSTGRES_USER: estimator
-      POSTGRES_PASSWORD: estimator
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U estimator -d estimator"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
   estimator:
     build: .
     container_name: estimator
@@ -27,16 +12,16 @@ services:
     env_file:
       - .env
 
-    # Override REDIS_URL for the in-network Redis service. The .env value
-    # (redis://localhost:6379) is meant for running uvicorn outside Docker.
+    # Override service URLs for the in-network services. The .env values are
+    # meant for running uvicorn outside Docker.
     environment:
       REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgresql+asyncpg://estimator:estimator@postgres:5432/estimator
+      DATABASE_URL: postgresql+psycopg://estimator:estimator@estimator-postgres:5432/estimator
 
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      estimator-postgres:
         condition: service_healthy
 
     # Bind-mount the app/ directory so code changes are reflected immediately
@@ -51,9 +36,11 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
 
-    # Override the default CMD to enable auto-reload on file changes.
+    # Apply pending migrations on startup, then run uvicorn with auto-reload.
     # Remove --reload for production deployments.
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
     restart: unless-stopped
 
@@ -62,17 +49,18 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 30s
       retries: 3
 
   redis:
-  # redis:7-alpine, which doesn't include the RediSearch module — but app/cache/semantic.py uses FT.SEARCH via redisvl.
-  # The redis/redis-stack-server image includes RediSearch and other Redis modules, and is compatible with the same Redis client libraries.
-  # 7.4.0-v8
-    image: redis/redis-stack-server:latest
+    # Redis Stack bundles the RediSearch + RedisJSON modules that redisvl uses
+    # to do vector similarity queries for the semantic cache. The vanilla
+    # ``redis:7-alpine`` image does NOT ship these modules.
+    image: redis/redis-stack:7.4.0-v0
     container_name: estimator-redis
     ports:
       - "6379:6379"
+      - "8001:8001"  # RedisInsight UI (handy during the live demo)
     volumes:
       - redis_data:/data
     healthcheck:
@@ -82,6 +70,46 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Service name is estimator-postgres (not plain "postgres") so it does not
+  # collide with estimator-web's own "postgres" service when the root
+  # docker-compose.yml pulls both subprojects in via `include:` (which forbids
+  # duplicate resource names across included files).
+  estimator-postgres:
+    # pgvector/pgvector:pg16 ships the pgvector extension already compiled.
+    # The Session 8 migration activates it (CREATE EXTENSION vector).
+    image: pgvector/pgvector:pg16
+    container_name: estimator-postgres
+    environment:
+      POSTGRES_USER: estimator
+      POSTGRES_PASSWORD: estimator
+      POSTGRES_DB: estimator
+    # Session 8 live: tuning for HNSW index builds. Parallel builds use shared
+    # memory, hence shm_size. The -c values are conservative so they work on
+    # any reasonable dev machine; in real production they scale with the RAM
+    # of the host (rule of thumb: shared_buffers ~25% of RAM,
+    # effective_cache_size ~75%, maintenance_work_mem as much as one index
+    # build needs without starving the rest).
+    shm_size: 1gb
+    command: >
+      postgres
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c max_parallel_maintenance_workers=2
+    ports:
+      # Port 5433 on the host to avoid colliding with the estimator-web
+      # Postgres (5432). Inside the network we still talk on 5432.
+      - "5433:5432"
+    volumes:
+      - estimator_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "estimator", "-d", "estimator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   redis_data:
-  postgres_data:
+  estimator_postgres_data:

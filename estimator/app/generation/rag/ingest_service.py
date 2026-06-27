@@ -50,7 +50,12 @@ class RagIngestService:
         self._store = store
 
     async def ingest(
-        self, *, source_path: str, document_type: str, budget: Budget
+        self,
+        *,
+        source_path: str,
+        document_type: str,
+        budget: Budget,
+        chunk_type: str = "budget_component",
     ) -> IngestResponse:
         started = time.perf_counter()
 
@@ -81,6 +86,7 @@ class RagIngestService:
                     "year": budget.year,
                 },
                 embedded_chunks=embedded,
+                chunk_type=chunk_type,
             )
             # 5. Commit on scope exit (session.begin()).
 

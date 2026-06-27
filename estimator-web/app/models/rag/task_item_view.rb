@@ -1,0 +1,56 @@
+# Mirror of the FastAPI ``TaskItem`` plus the Session 10 per-task hours fields.
+# A task carries its citations (``sources``) and, once estimated, the hours
+# derived by vector search (``estimated_hours`` + ``hours_reliability`` +
+# ``has_match``) and the human-set ``rate_eur_per_hour``. ``engineer_days`` stays
+# for the legacy Session 9 single-shot path (it is nil in the structure-only flow).
+module Rag
+  class TaskItemView
+    include ActiveModel::Model
+    include ActiveModel::Attributes
+
+    attribute :name, :string
+    attribute :description, :string
+    attribute :engineer_days, :integer
+    # Session 10 hours flow.
+    attribute :estimated_hours, :integer
+    attribute :hours_reliability, :float
+    attribute :rate_eur_per_hour, :integer
+    attribute :has_match, :boolean, default: true
+
+    attr_reader :sources
+
+    def self.from_hash(hash)
+      new(hash || {})
+    end
+
+    def initialize(attributes = {})
+      stringified = (attributes || {}).transform_keys(&:to_s)
+      @sources = Array(stringified.delete("sources")).map(&:to_i)
+      super(stringified.slice(
+        "name", "description", "engineer_days",
+        "estimated_hours", "rate_eur_per_hour", "hours_reliability", "has_match"
+      ))
+    end
+
+    def sources_label = sources.join(", ")
+
+    # Red flag: no historical analog was found, so no hours were derived.
+    def flagged? = has_match == false
+
+    def reliability_pct = hours_reliability ? (hours_reliability * 100).round : nil
+
+    # Traffic-light band for the UI: red = no match, amber = weak, green = strong.
+    def reliability_band
+      return :red if flagged?
+      return :unknown if hours_reliability.nil?
+
+      hours_reliability >= 0.66 ? :green : :amber
+    end
+
+    def cost_eur
+      return 0 if estimated_hours.nil? || rate_eur_per_hour.nil?
+
+      estimated_hours * rate_eur_per_hour
+    end
+  end
+end

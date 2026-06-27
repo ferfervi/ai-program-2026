@@ -16,9 +16,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 
 # Install production dependencies only (no dev tools like pytest/ruff).
-# --frozen ensures uv respects the lockfile without modifying it.
 # --no-install-project skips installing our own package (we just need deps).
-RUN uv sync --frozen --no-install-project --no-dev
+# uv will generate the lockfile if it doesn't exist yet.
+RUN uv sync --no-install-project --no-dev
 
 
 # =============================================================================
