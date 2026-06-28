@@ -4,6 +4,8 @@
 
 # RAG system for estimates
 
+**Arquitectrure actual**: schemas [here](arquitectura-actual.md)
+
 
 ## 📌 Pre Session 11 — Citación verificable + RAGAS (ejercicio actual)
 
@@ -14,6 +16,31 @@ recuperado), y monta el primer **baseline de calidad de generación con RAGAS** 
 set de la S10 extendido con una respuesta de referencia (`ground_truth`) por consulta.
 
 ➡️ **[Análisis completo: estimator/pre_session_11_analysis.md](estimator/pre_session_11_analysis.md)**
+
+### UI Streamlit del flujo nuevo (`streamlit_app_s11.py`)
+
+UI mínima que ejercita el endpoint nuevo `POST /v1/estimate/from-transcript`: pega una
+transcripción y devuelve la estimación en engineer-days (modules → tasks) con la
+**verificación de citaciones por línea** (grounded / insufficient + la evidencia verbatim de
+cada fuente). Trae una transcripción de ejemplo (banca móvil) que funciona contra el corpus.
+
+```bash
+# 1) Stack arriba y corpus de presupuestos ingestado (ver Pre Session 10)
+docker compose up -d
+docker compose run --rm estimator python scripts/query_examples.py
+
+# 2) IMPORTANTE: la generación usa gpt-5 (reasoning alto) y tarda minutos; el
+#    LLM_TIMEOUT=30 por defecto provoca 502. Súbelo y recrea el contenedor:
+#    en estimator/.env -> LLM_TIMEOUT=600
+docker compose up -d --force-recreate estimator
+
+# 3) Lanzar la UI (desde la raíz del repo)
+export ESTIMATE_API_KEY=$(grep '^ESTIMATE_API_KEY=' estimator/.env | cut -d= -f2-)
+streamlit run streamlit_app_s11.py        # http://localhost:8501
+```
+
+> Nota: `estimator/streamlit_app.py` (sesiones conversacionales, €/semanas) es el flujo
+> **viejo** y no sirve para esto; esta `streamlit_app_s11.py` es la del flujo con citación.
 
 ---
 

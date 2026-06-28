@@ -1,3 +1,164 @@
+# Arquitectura actual — Sesión 11 (pre-work)
+
+> Lo que en la Sesión 09 era "hueco" (la frontera roja) **ya está cerrado**. El bucle
+> transcripción → estimación fundamentada existe end-to-end: reformulación, recuperación
+> híbrida + reranking (S10), ensamblado de contexto y generación estructurada con
+> **citación verificable a nivel de línea** (S11). Aquí se documentan los **dos flujos por
+> separado** — ingesta (offline) y estimación (online) — con sus diagramas y endpoints.
+>
+> Paleta de los diagramas: 🟡 fuentes/datos · 🔵 proceso · 🟢 llamada LLM · 🟣 almacenamiento
+> (pgvector) · 🔷 endpoint HTTP · 🟠 salida. Todos con texto oscuro para leerse en claro/oscuro.
+
+## A. Flujo de ingesta (offline)
+
+Llena las **tres colecciones vectoriales** que luego consume el retriever. Cada colección es
+una tabla propia (Article 5 "Opción B": metadatos divergentes → tablas separadas), todas con
+embedding `text-embedding-3-small` (1536d) y, en `budget_chunks`, columna full-text
+`content_tsv` para la rama léxica de la búsqueda híbrida.
+
+```mermaid
+flowchart LR
+  classDef src   fill:#fff3cd,stroke:#b8860b,color:#3a2f00,stroke-width:1px;
+  classDef proc  fill:#cfe4ff,stroke:#2f5fb0,color:#10243e,stroke-width:1px;
+  classDef ep    fill:#d1ecf1,stroke:#0c7c8c,color:#06343b,stroke-width:1px;
+  classDef store fill:#e7dbf7,stroke:#6f42c1,color:#2a1a4a,stroke-width:2px;
+
+  B["data/budgets_sample.json<br/>17 presupuestos"]:::src
+  K["data/task_corpus.json<br/>~60 proyectos / ~1.5k tareas"]:::src
+  TD["data/transcripts_sample.json<br/>data/technical_docs_sample.json"]:::src
+
+  QE["scripts/query_examples.py<br/>POST /embeddings/ingest<br/>(1 documento por presupuesto)"]:::ep
+  TC["scripts/build_task_corpus.py --ingest<br/>POST /embeddings/ingest<br/>chunk_type=historical_task"]:::ep
+  MI["scripts/build_multi_index_corpus.py<br/>ChunkStore directo (sin HTTP)<br/>chunk + embed + persist"]:::proc
+
+  CHUNK["chunker estructural<br/>1 chunk = 1 componente / tarea"]:::proc
+  EMB["embedder<br/>text-embedding-3-small · 1536d"]:::proc
+
+  BC[("budget_chunks<br/>embedding + content_tsv (FTS)")]:::store
+  TRC[("transcript_chunks")]:::store
+  DCC[("technical_doc_chunks")]:::store
+
+  B --> QE --> CHUNK
+  K --> TC --> CHUNK
+  CHUNK --> EMB --> BC
+  TD --> MI --> TRC
+  MI --> DCC
+```
+
+**Detalles del flujo:**
+
+- **Budgets → `budget_chunks`** (lo que usa la estimación). `scripts/query_examples.py` recorre
+  `budgets_sample.json` y hace **un `POST /embeddings/ingest` por presupuesto**; el chunker
+  estructural parte cada presupuesto en 1 chunk por componente, se embebe y se persiste. Es
+  **idempotente** (un documento ya persistido responde `409`). Resultado: 60 chunks.
+- **Task corpus → `budget_chunks`** (mismo tabla, `chunk_type='historical_task'`).
+  `scripts/build_task_corpus.py --ingest` sintetiza proyectos→módulos→tareas y los ingesta por
+  el mismo endpoint, marcados para la búsqueda de horas por-tarea (S10, `POST /v1/estimate/tasks/hours`).
+- **Transcripts + technical docs → `transcript_chunks` / `technical_doc_chunks`.**
+  `scripts/build_multi_index_corpus.py` va **directo por `ChunkStore`** (no HTTP) porque cada
+  colección tiene su propio esquema de metadatos. Idempotente por `source_path`.
+- **Gobernanza S06 (paralela).** `POST /api/v1/ingestion/runs` (+ `GET /api/v1/ingestion/jobs/{id}`)
+  ejecuta catálogo → parsers → cleaning → PII y produce *Documents* limpios/pseudonimizados; es
+  la disciplina de datos previa, no escribe en las tablas vectoriales.
+
+**Endpoints / comandos de ingesta:**
+
+| Colección | Comando | Endpoint | Mecanismo |
+| --- | --- | --- | --- |
+| `budget_chunks` | `scripts/query_examples.py` | `POST /embeddings/ingest` | HTTP, 1 doc/presupuesto |
+| `budget_chunks` (tareas) | `scripts/build_task_corpus.py --ingest` | `POST /embeddings/ingest` | HTTP, `chunk_type=historical_task` |
+| `transcript_chunks` + `technical_doc_chunks` | `scripts/build_multi_index_corpus.py` | — (ChunkStore) | directo a BD |
+| Documents gobernados (S06) | — | `POST /api/v1/ingestion/runs` | BackgroundTask + catálogo |
+
+Verificación rápida (esperado 60 / 11 / 8):
+
+```bash
+docker compose exec -T estimator-postgres psql -U estimator -d estimator -c "
+SELECT 'budget_chunks' t, count(*) FROM budget_chunks
+UNION ALL SELECT 'transcript_chunks', count(*) FROM transcript_chunks
+UNION ALL SELECT 'technical_doc_chunks', count(*) FROM technical_doc_chunks;"
+```
+
+## B. Flujo de estimación (online)
+
+El endpoint estrella: una transcripción cruda entra, una estimación en engineer-days con
+citación por línea sale. Es el más protegido del servicio (rate limit 10/min, idempotente).
+
+```mermaid
+flowchart TB
+  classDef io    fill:#fff3cd,stroke:#b8860b,color:#3a2f00,stroke-width:1px;
+  classDef ep    fill:#d1ecf1,stroke:#0c7c8c,color:#06343b,stroke-width:2px;
+  classDef proc  fill:#cfe4ff,stroke:#2f5fb0,color:#10243e,stroke-width:1px;
+  classDef llm   fill:#d8f5d8,stroke:#1f9d57,color:#0f3d23,stroke-width:1px;
+  classDef store fill:#e7dbf7,stroke:#6f42c1,color:#2a1a4a,stroke-width:1px;
+  classDef out   fill:#ffe0cc,stroke:#e8590c,color:#5a2400,stroke-width:2px;
+
+  IN["Transcripción (texto libre · ≥100 chars)"]:::io
+  EP["POST /v1/estimate/from-transcript<br/>auth X-API-Key · 10/min · idempotente"]:::ep
+
+  R1["1 · reformulate_query<br/>LLM gpt-5-mini → EstimationQuery<br/>(features, sector, escala, restricciones)"]:::llm
+  R2["2 · compose_search_text + embed<br/>text-embedding-3-small (1536d)"]:::proc
+  R3["3 · retrieve() sobre budget_chunks<br/>vector/híbrido + RRF + reranker<br/>(RETRIEVAL_SEARCH_MODE / RERANKER_ENABLED)"]:::proc
+  ST[("budget_chunks<br/>pgvector + content_tsv")]:::store
+  R4["4 · truncate_to_token_budget<br/>+ build_context_block<br/>(XML &lt;source id=.. document_id=..&gt;)"]:::proc
+  R5["5 · generate_estimate<br/>LLM gpt-5 · reasoning=high · max_tokens=GENERATION_MAX_TOKENS"]:::llm
+  R6["6 · verify_citations<br/>(grounded / dangling / insufficient)"]:::proc
+  CO["7 · coherence check"]:::proc
+  OUT["Estimate<br/>modules→tasks (engineer-days)<br/>+ sources por línea + assumptions + confidence"]:::out
+
+  IN --> EP --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> CO --> OUT --> EP
+  R3 <-->|"k-NN coseno + ts_rank_cd"| ST
+  R6 -.->|"si hay citaciones colgantes: 1 reintento correctivo"| R5
+```
+
+**Detalles del flujo (paso a paso):**
+
+1. **Reformulación** (`reformulate_query`, LLM `gpt-5-mini`). Convierte la transcripción que
+   divaga en una `EstimationQuery` estructurada (function, technologies, sector, scale,
+   regulations, constraints) — ataca el ruido conversacional que en S09 hundía el ranking.
+2. **Embedding de la consulta** (`compose_search_text` + `text-embedding-3-small`). Se embebe el
+   *search_text* destilado, no la transcripción cruda.
+3. **Recuperación** (`retrieve()` sobre `budget_chunks`). Búsqueda **vectorial o híbrida**
+   (rama densa k-NN coseno + rama léxica `ts_rank_cd` fusionadas por **RRF**) y **reranking**
+   recall-then-rerank con cross-encoder, todo gobernado por la config runtime
+   (`RETRIEVAL_SEARCH_MODE`, `RERANKER_ENABLED`, ajustables vía `PUT /api/v1/config/retrieval`).
+4. **Ensamblado del contexto** (`truncate_to_token_budget` + `build_context_block`). Recorta al
+   presupuesto de tokens (`MAX_CONTEXT_TOKENS`, tiktoken) y envuelve cada chunk en
+   `<source id="{id}" document_id="{budget_id}">…</source>` — el `id` que la generación citará.
+5. **Generación** (`generate_estimate`, LLM `gpt-5`, `reasoning_effort=high`). Produce el
+   `Estimate`: modules→tasks en engineer-days, cada tarea con `grounded` + `sources`
+   (`chunk_id`, `document_id`, `evidence` verbatim). Validadores Pydantic + Instructor
+   re-prompts garantizan la regla de integridad (grounded ⇒ ≥1 fuente; no-grounded ⇒ sin horas).
+6. **Verificación de citaciones** (`verify_citations`). Comprueba que cada `chunk_id` citado
+   estaba en el contexto recuperado. Si detecta **colgantes** (ids inventados), hace **1 reintento
+   correctivo** y, si persiste, degrada `confidence`. Una colgante es fallo de calidad, no cosmético.
+7. **Coherencia** (`check_coherence`) y salida del `Estimate`.
+
+> ⚠️ **Operativa:** la generación con `gpt-5` + `reasoning_effort=high` tarda minutos; el
+> `LLM_TIMEOUT` por defecto (30 s) provoca **502 por timeout**. Para usar el endpoint hay que
+> subirlo (`LLM_TIMEOUT=600` en `estimator/.env`) y recrear el contenedor.
+
+**Endpoints de estimación / recuperación:**
+
+| Endpoint | Auth · límite | Para qué |
+| --- | --- | --- |
+| `POST /v1/estimate/from-transcript` | `ESTIMATE_API_KEY` · 10/min · idempotente | Pipeline completo (1→7), salida `Estimate` citado |
+| `POST /v1/estimate/stages/{reformulate,retrieve,assemble,generate,structure}` | — | Cada etapa por separado (didáctico); `generate` expone `citation_report` |
+| `POST /v1/estimate/tasks/hours` | — | Horas por tarea (consenso ponderado de vecinos `historical_task`) — wizard S10 |
+| `POST /v1/retrieval/search` | `RETRIEVAL_API_KEY` · 120/min | k-NN filtrado + umbral (una colección) |
+| `POST /v1/retrieval/advanced-search` | `RETRIEVAL_API_KEY` · 120/min | Routing multi-índice + expansión + decay (S10) |
+| `PUT /api/v1/config/retrieval` | — | Toggles runtime (search_mode, reranker, decay) |
+
+> **Variante S10 (wizard de Rails):** en lugar de fundamentar la estructura, descompone el
+> brief **libremente** (`/stages/structure`, sin `<sources>`) y reintroduce el retrieval
+> **por tarea** (`/v1/estimate/tasks/hours`). El `from-transcript` de arriba es la vía
+> *grounded con horas inline* (S09) que coexiste como camino de comparación.
+
+**UI:** `streamlit_app_s11.py` (raíz del repo) consume `POST /v1/estimate/from-transcript` y
+renderiza el breakdown modules→tasks con la verificación de citaciones por línea (ver README).
+
+---
+
 # Diagnóstico arquitectónico — Sesión 09 (pre-work)
 
 > Estado del servicio IA al cierre de Sesión 08 y hueco hasta la estimación generada por RAG.
