@@ -5,6 +5,27 @@
 # RAG system for estimates
 
 
+## 📌 Pre Session 11 — Citación verificable + RAGAS (ejercicio actual)
+
+Sube la citación de la estimación a **nivel de línea** y la hace **verificable
+programáticamente** (detecta citaciones colgantes: fuentes que no estaban en el contexto
+recuperado), y monta el primer **baseline de calidad de generación con RAGAS** —
+`faithfulness`, `answer_relevancy`, `context_precision`, `context_recall` — sobre el golden
+set de la S10 extendido con una respuesta de referencia (`ground_truth`) por consulta.
+
+➡️ **[Análisis completo: estimator/pre_session_11_analysis.md](estimator/pre_session_11_analysis.md)**
+
+---
+
+## 📎 Pre Session 10 — Búsqueda híbrida + reranking
+
+Medición de búsqueda híbrida (full-text + RRF) y reranking recall-then-rerank sobre el golden
+set: precisión@5 y latencia de las cuatro configuraciones (vectorial/híbrida × con/sin rerank).
+
+➡️ **[Análisis completo: estimator/pre_session_10_analysis.md](estimator/pre_session_10_analysis.md)**
+
+---
+
 ## session-08
 
 Run `cd estimator`.

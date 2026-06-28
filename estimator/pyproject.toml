@@ -39,8 +39,15 @@ dependencies = [
     "greenlet>=3.0",
     # Session 9 — RAG API hardening (per-API-key rate limiting)
     "slowapi>=0.1.9",
-    # Session 10 — cross-encoder reranking (recall-then-rerank). Pulls torch.
+    # Session 10 — cross-encoder reranking (recall-then-rerank). Pulls torch;
+    # torch + torchvision are declared explicitly (below) only so the CPU-index
+    # pin in [tool.uv.sources] takes effect — sentence-transformers/transformers
+    # would otherwise drag in the multi-GB CUDA build. Both MUST come from the
+    # same index: a +cpu torch against a CUDA torchvision breaks at import
+    # ("operator torchvision::nms does not exist").
     "sentence-transformers>=3.0",
+    "torch>=2.0",
+    "torchvision>=0.15",
     # Session 6 — data-driven AI
     "pandas>=2.2",
     "pandera>=0.20",
@@ -64,7 +71,24 @@ dev = [
     "ruff>=0.5",
     "fakeredis>=2.20",
     "deepeval>=1.0",
+    # Session 11 — RAGAS generation-quality evaluation (LLM-judge + embeddings).
+    "ragas>=0.2",
+    "datasets>=2.19",
 ]
+
+# Install the CPU-only PyTorch build. Neither target environment (Docker image
+# nor host) has an NVIDIA GPU, so the default CUDA wheels — ~3-5 GB of nvidia-*
+# libraries pulled transitively by sentence-transformers — are dead weight that
+# only slow the image build and bloat the venv. Pinning torch to the CPU index
+# keeps the reranker on its actual runtime (CPU) and shrinks the build.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 100
