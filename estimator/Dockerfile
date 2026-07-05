@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Stage 1 — Builder
 # =============================================================================
@@ -17,8 +18,11 @@ COPY pyproject.toml uv.lock* ./
 
 # Install production dependencies only (no dev tools like pytest/ruff).
 # --no-install-project skips installing our own package (we just need deps).
-# uv will generate the lockfile if it doesn't exist yet.
-RUN uv sync --no-install-project --no-dev
+# The BuildKit cache mount persists uv's wheel cache across builds, so a rebuild
+# (even after the lockfile changes) reuses already-downloaded wheels instead of
+# re-fetching them — turning a multi-minute download into seconds.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project --no-dev
 
 
 # =============================================================================

@@ -323,3 +323,52 @@ al reordenador. En un corpus mayor y más ruidoso, con muchos candidatos "casi r
 en el pool de recall y una métrica sensible al orden (MRR / nDCG / recall@k a nivel de
 documento), el reranking sí podría justificar su coste — y por eso se mantiene como toggle
 desactivable, no como código fijo.
+
+---
+
+## Anexo — Ingesta de las tres colecciones (multi-índice)
+
+Esta medición solo usa `budget_chunks`, pero el proyecto mantiene tres tablas de chunks. Así
+se pueblan todas desde cero (con el stack arriba: `docker compose up -d`):
+
+```bash
+# 1) budgets → budget_chunks  (vía HTTP, la API debe estar arriba)
+docker compose run --rm estimator python scripts/query_examples.py
+
+# 2) transcripts + technical docs → transcript_chunks + technical_doc_chunks
+docker compose run --rm estimator python scripts/build_multi_index_corpus.py
+```
+
+| Tabla | Comando | Se carga desde | Mecanismo |
+| --- | --- | --- | --- |
+| `budget_chunks` | `scripts/query_examples.py` | `data/budgets_sample.json` | HTTP `POST /embeddings/ingest` (1 documento por presupuesto) |
+| `transcript_chunks` | `scripts/build_multi_index_corpus.py` | `data/transcripts_sample.json` | directo vía `ChunkStore` |
+| `technical_doc_chunks` | `scripts/build_multi_index_corpus.py` | `data/technical_docs_sample.json` | directo vía `ChunkStore` |
+
+Notas:
+
+- `build_multi_index_corpus.py` cubre **las dos colecciones nuevas** en una sola ejecución.
+- `query_examples.py` habla por HTTP → la API debe estar levantada (de ahí el
+  `docker compose up -d` previo). Las otras dos van directas a la BD vía `ChunkStore`.
+- Ambos scripts son **idempotentes**: budgets ya persistidos responden `409`; los del
+  multi-índice se omiten por `source_path`. Re-ejecutar no duplica.
+
+Verificación (esperado: 60 / 11 / 8):
+
+```bash
+docker compose exec -T estimator-postgres psql -U estimator -d estimator -c "
+SELECT 'budget_chunks' AS tabla, count(*) FROM budget_chunks
+UNION ALL SELECT 'transcript_chunks', count(*) FROM transcript_chunks
+UNION ALL SELECT 'technical_doc_chunks', count(*) FROM technical_doc_chunks;"
+```
+
+Vaciar y reingestar (el borrado en `documents` arrastra los chunks por FK en cascada):
+
+```bash
+# budgets
+docker compose exec -T estimator-postgres psql -U estimator -d estimator \
+  -c "DELETE FROM documents WHERE document_type='historical_budget';"
+# transcripts + technical docs
+docker compose exec -T estimator-postgres psql -U estimator -d estimator \
+  -c "DELETE FROM documents WHERE document_type IN ('meeting_transcript','technical_doc');"
+```
