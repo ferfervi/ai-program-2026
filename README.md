@@ -6,6 +6,62 @@
 
 **Arquitectrure actual**: schemas [here](arquitectura-actual.md)
 
+## Pre Session 12 - Agentic
+
+#### Pre requisites
+
+Ingestion done:
+`uv run python scripts/build_task_corpus.py --ingest`
+
+#### How to run exercise with simple model?
+
+```
+cd estimator
+DATABASE_URL='postgresql+psycopg://estimator:estimator@localhost:5433/estimator' \
+REDIS_URL='redis://localhost:6379' \
+uv run python scripts/run_agent_s12.py \
+    exercises/session-12/sample_transcript_simple.txt --model gpt-5-mini --effort minimal
+
+```
+
+#### How it runs — no HTTP API, the modules are imported in-process
+
+There is **no HTTP endpoint or Rails UI for Session 12** (it's pre-exercise scope).
+`run_agent_s12.py` is a **standalone process**: it `import`s the estimator's own code and
+runs it directly, rather than POSTing to the FastAPI server. So even with the container
+running, **you will see no request logs on the server side** — the container's uvicorn is
+never contacted. The chain is:
+
+```
+run_agent_s12.py
+  └→ run_estimation_agent()            (app/generation/agentic/agent_loop.py, imported)
+       └→ agent tool `search_budgets`
+            └→ retrieve()               (app/generation/rag/retriever.py, imported)
+                 └→ Postgres/pgvector   (direct TCP to localhost:5433)
+```
+
+Because the library code is imported and executed in *this* process, the structlog lines
+you see (`rag_retrieve_done`, `agent_tool_search_budgets`, …) are emitted **by the script
+itself**, not by the server. They are still the *real* retrieval path: `retrieve()` opens a
+**direct connection to Postgres** (that is why the run needs `DATABASE_URL`/`REDIS_URL`
+overridden to `localhost:5433` / `localhost:6379` — the `.env` defaults use the in-Docker
+service names `estimator-postgres` / `redis`, which don't resolve from the host).
+
+The only external network call is to the **OpenAI Responses API** (the `gpt-5-mini`/`gpt-5`
+agent loop). Local FastAPI is not in the loop at all.
+
+| Component | Contacted? | How |
+|---|---|---|
+| FastAPI container (uvicorn) | ❌ No | code is imported in-process, not called over HTTP |
+| Postgres / pgvector | ✅ Yes | direct connection to `localhost:5433` from the script |
+| Redis | ✅ Yes | direct connection to `localhost:6379` |
+| OpenAI Responses API | ✅ Yes | the agent reason→act→observe loop |
+
+The agent's `search_budgets` tool queries the corpus filtered to
+`chunk_type='historical_task'` (the ~1.5k fine-grained task chunks ingested by
+`build_task_corpus.py`), so ensure that ingestion ran first (see prerequisites above).
+
+
 
 ## 📌 Pre Session 11 — Citación verificable + RAGAS (ejercicio actual)
 
