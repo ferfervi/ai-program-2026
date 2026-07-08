@@ -24,6 +24,14 @@ uv run python scripts/run_agent_s12.py \
 
 ```
 
+#### Generate exercise solution
+
+```
+DATABASE_URL='postgresql+psycopg://estimator:estimator@localhost:5433/estimator' REDIS_URL='redis://localhost:6379' uv run python exercises/session-12/my_solution_scratch/my_solution_run_agent_s12.py     exercises/session-12/sample_transcript_complex.txt --model gpt-5 --effort medium > exercises/session-12/my_solution_scratch/exercise_complex_output.txt
+
+```
+
+
 #### How it runs — no HTTP API, the modules are imported in-process
 
 There is **no HTTP endpoint or Rails UI for Session 12** (it's pre-exercise scope).
