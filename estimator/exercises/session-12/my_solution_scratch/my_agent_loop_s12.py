@@ -28,13 +28,17 @@ with all the components and their reference amounts to get a partial-and-total \
 breakdown.
 4. Call `validate_estimate` as the LAST tool step and fix anything it flags \
 (e.g. a component with no historical reference — search again for it).\
-If some estimation looks suspicious, you can call `search_budgets` again for that component to get more references.
+
 5. When you are satisfied, stop calling tools. You will then be asked to return the \
 final structured estimate.
 
 You have exactly these tools: `search_budgets`, `calculate_estimate`, \
 `validate_estimate`. Ground your numbers in what `search_budgets` returns; when you \
 must assume something the transcript did not specify, record it as an assumption.\
+
+If some estimation looks suspicious, you can reformulate the query and call \
+      `search_budgets` again, keeping the better one and calling the tools \
+      `calculate_estimate` and `validate_estimate` again if necessary.
 """
 
 FINAL_INSTRUCTION = (
