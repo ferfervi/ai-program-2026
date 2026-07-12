@@ -6,6 +6,17 @@
 
 **Arquitectrure actual**: schemas [here](arquitectura-actual.md)
 
+## Post Session 12 - Agentic with fixed 2 phases, only retrying/reformulating flagged tasks not found in DB
+
+How Ro run:
+
+```
+cd estimator
+
+DATABASE_URL='postgresql+psycopg://estimator:estimator@localhost:5433/estimator' REDIS_URL='redis://localhost:6379' uv run python scripts/run_agent_s12.py     exercises/session-12/sample_transcript_complex.txt --model gpt-5 --effort medium     --out exercises/session-12/solution_output_complex_original.txt
+```
+
+
 ## Pre Session 12 - Agentic
 
 #### Pre requisites
